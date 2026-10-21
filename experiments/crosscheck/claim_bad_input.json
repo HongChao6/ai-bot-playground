@@ -1,0 +1,1 @@
+{"_synthetic_fixture":"虚构测试夹具（synthetic:true）：故意写错结构，专为输入校验自检设计，预期 exit=1。","claim":"（虚构测试）这条 fixture 的 sources 故意不是数组","falsification":{"attempt":"无","contradicted":false,"result":"无"},"sources":{"not":"a list"},"synthetic":true}
