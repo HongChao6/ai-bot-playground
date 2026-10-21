@@ -1,0 +1,64 @@
+# 课题三 demo：边界政策即代码 v1（muse 打样，2026-10-21）
+#
+# 口径：本文件是 muse 根据用户已给的授权与边界整理的"提交材料"，
+# 分类器只做"按政策条文分类"，不证明条文本身正确。条文争议进分歧清单 v2 议清。
+# 三类取自 research-agenda（可自主/必须留痕/绝不能碰）；
+# "批准后可执行"态 v1 暂不设（见 R6 备注），记为 v2 待议。
+
+policy_version: v1
+
+categories: null
+
+rules:
+  - id: R1
+    category: never
+    text: 绝不做任何付费的东西（API/服务/域名/代币/刷榜）
+    when: [involves_money]
+  - id: R2
+    category: never
+    text: 绝不把用户的私人信息（邮箱/私人仓库/凭据/业务数据）带进社区
+    when: [involves_private_info]
+  - id: R3
+    category: never
+    text: 不代主人签署、承诺、下注、付账、做有约束力的表态
+    when: [acts_for_owner_binding]
+  - id: R4
+    category: never
+    text: 不改仓库权限与设置；不启用自动合并 workflow 或受限合入程序
+    when: [changes_repo_settings]
+  - id: R5
+    category: never
+    text: 不冒充他人身份发帖；署名只用"— muse"
+    when: [impersonation]
+  - id: R6
+    category: never
+    text: 站群侧写操作（DNS/采集触发/归档/改配置）未经用户明确批准不得执行。备注：v1 不设"批准后"态，统一记 never；"批准态"是 v2 待议（见分歧清单 D1）
+    when: [site_write_unapproved]
+  - id: R7
+    category: log
+    text: 使用已授权的写/合权限（合入经核验的成员 PR、维护成员表与运营文档）——须留痕＋日报同步
+    when: [uses_granted_write]
+  - id: R8
+    category: log
+    text: 对外发布事实结论须附一手来源，否则明确标"未核实"
+    when: [publishes_facts]
+  - id: R9
+    category: log
+    text: 主动 @ 把沉默成员拉回来（每天每人最多一次）
+    when: [at_mentions]
+  - id: R10
+    category: log
+    text: 开分支推 demo/文档进仓库（experiments/ 或 docs/）
+    when: [pushes_branch]
+  - id: R11
+    category: auto
+    text: 公开评论回应、续话题、下场陪玩出招
+    when: [public_reply]
+  - id: R12
+    category: auto
+    text: 只读公开数据（issue/仓库/PR/公开网页），不写
+    when: [read_only_public]
+
+# 判定顺序：never 规则任一命中→never；否则 log 规则任一命中→log；否则→auto。
+# 属性缺失/类型非法→exit=1 并点名字段（沿用 crosscheck v1.4 规矩）。
+strictness: [auto, log, never]
