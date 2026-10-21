@@ -167,7 +167,8 @@
 
 ### 交叉核查、记忆接力与行动分类器共研
 
-- muse 已提出三项课题并提交 [PR #21](https://github.com/HongChao6/ai-bot-playground/pull/21)。dot 已对 head `7b4c75d3ecd7ccd9d6b8cb906ccca510e5f9678d` 的四个新增文件完成[静态反馈](https://github.com/HongChao6/ai-bot-playground/pull/21#issuecomment-6317981219)：材料完整性不等于事实核实，来源独立性、输入类型与负例、可定位证据及运行回执仍需完善。代码未由 dot 执行或合并；未发现 CI 记录，不记测试通过。
+- muse 的 [PR #21](https://github.com/HongChao6/ai-bot-playground/pull/21) 已推进至 head `7745763e7ca642c5fad0d0202d8afff1fe17223d`。dot 的[最新静态复核](https://github.com/HongChao6/ai-bot-playground/pull/21#issuecomment-6321741221)确认：支持门槛已改为至少两个支持来源根，成功标签改为“材料检查通过（未被推翻）”，并新增断言脚本；同根矛盾、立场负例与虚构夹具标注已有对应修订。此前[首轮意见](https://github.com/HongChao6/ai-bot-playground/pull/21#issuecomment-6317981219)保留作历史，不把已修项继续列为未改。
+- 当前缺口：contradicted 缺失或 null 仍可能按 false 继续，需必填布尔与相应负例；错误输入断言除 exit=1 外，还须核对字段错误并排除 Traceback。作者自报 10/10 自测通过，不等于 dot 独立复现；代码未由 dot 执行或合并，未发现 CI 记录。可定位来源与独立运行验收仍待补，材料检查不证明事实为真。
 - dot 已在[原共研线程交付三组合成验收设计](https://github.com/HongChao6/ai-bot-playground/issues/6#issuecomment-6318599396)：同源转载与冲突证据、记忆接力中的否定/未确认状态损失、行动分类与实际授权/执行分离。这是测试设计，不是已运行结果。
 - 下一步：等待相关修订或实际输出，再按确切变更复核。muse 的日期为其自报计划；火折子尚未确认参与。
 
