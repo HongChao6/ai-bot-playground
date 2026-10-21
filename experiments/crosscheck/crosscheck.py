@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""crosscheck.py —— 多 bot 交叉核实协议 v1.2（可执行版）
+"""crosscheck.py —— 多 bot 交叉核实协议 v1.3（可执行版）
 
 把社区里沉淀的核实方法论编码成判定规则：
 - 四栏法：结论 / 证据在哪 / 什么能证伪我 / 还差什么
-- 来源独立 + 路径独立：至少 2 个独立来源根（同源转载合并计 1），不是数链接
-- 证真 vs 证伪：必须实际做过一次推翻尝试；"过关"只算"未被推翻"，不算"证明为真"
-- v1.1 新增（dot 验收反例驱动）：origin 字段（同源合并计根）、stance 字段
-  （support/contradict/neutral）、证据冲突判"证据冲突／待核"、独立性未知单列不自动算独立
-- v1.2 新增（dot 增量静态复核驱动）：立场显式校验——无支持证据/同根内立场矛盾/
-  非法立场值一律判"待核（材料存疑）"，不再落 exit=0；卡头声明"材料检查≠事实核验"
+- 来源独立 + 路径独立：按 origin 归并来源根（同源转载合并计 1 根），不是数链接
+- 证真 vs 证伪：必须实际做过一次推翻尝试；过关只算"按材料未被推翻"
+- 支持根门槛（dot 复核 6320351297 point 1）：判定门槛只计算根立场=support
+  的来源根（要求 ≥2）；neutral / 未声明立场的根只计材料，不计入支持门槛
+- 成功标签（dot 复核 6320351297 point 2）：「已核实（未被推翻）」已改名
+  「材料检查通过（未被推翻）」，与实际检查范围（提交材料检查）一致；
+  机器可读状态 = 判定文本 + 退出码，不再靠免责声明补齐语义
+- 严格输入校验（dot 复核 6320351297 point 3）：类型错 → exit=1 输入错误
 
 用法：python3 crosscheck.py claim.json
 输入 JSON：
@@ -24,12 +26,54 @@
                     "result": "尝试结果",
                     "contradicted": false}
 }
-输出：Markdown 四栏核查卡 + 判定（已核实（未被推翻）/ 未核实 / 被推翻 / 证据冲突／待核 /
-待核（材料存疑））。
-退出码：0=已核实（未被推翻），2=未核实，3=被推翻，4=待核（含证据冲突与材料存疑），1=输入错误。
+输出：Markdown 四栏核查卡 + 判定。
+退出码：0=材料检查通过（未被推翻），2=未核实，3=被推翻，
+        4=待核（含证据冲突与材料存疑），1=输入错误。
+判定顺序：输入错误 > 被推翻（证伪已推翻）> 证据冲突／待核 >
+          待核（材料存疑）> 未核实（支持根不足或材料缺口）。
 """
 import json
 import sys
+
+VALID_STANCES = {"support", "contradict", "neutral"}
+
+
+def die(msg: str) -> int:
+    print(f"输入错误：{msg}", file=sys.stderr)
+    return 1
+
+
+def check_types(data) -> str | None:
+    """严格输入校验；返回错误描述，无错返回 None。"""
+    if not isinstance(data, dict):
+        return "顶层必须是 JSON 对象"
+    claim = data.get("claim")
+    if not isinstance(claim, str) or not claim.strip():
+        return "claim 字段必须是非空字符串"
+    sources = data.get("sources", [])
+    if not isinstance(sources, list):
+        return "sources 字段必须是数组"
+    for i, s in enumerate(sources, 1):
+        if not isinstance(s, dict):
+            return f"sources[{i}] 必须是对象"
+        for field in ("path", "ref", "quote", "origin", "stance", "as_of"):
+            v = s.get(field)
+            if v is not None and not isinstance(v, str):
+                return f"sources[{i}].{field} 必须是字符串"
+        if s.get("_synthetic_fixture") is not None and not isinstance(
+                s.get("_synthetic_fixture"), str):
+            return f"sources[{i}]._synthetic_fixture 必须是字符串"
+    fals = data.get("falsification", {})
+    if not isinstance(fals, dict):
+        return "falsification 字段必须是对象"
+    for field in ("attempt", "result"):
+        v = fals.get(field)
+        if v is not None and not isinstance(v, str):
+            return f"falsification.{field} 必须是字符串"
+    if fals.get("contradicted") is not None and not isinstance(
+            fals.get("contradicted"), bool):
+        return "falsification.contradicted 必须是布尔值"
+    return None
 
 
 def main() -> int:
@@ -39,21 +83,25 @@ def main() -> int:
     try:
         with open(sys.argv[1], encoding="utf-8") as f:
             data = json.load(f)
-    except Exception as e:
-        print(f"读不进 claim 文件：{e}", file=sys.stderr)
+    except FileNotFoundError:
+        print(f"读不进 claim 文件：文件不存在：{sys.argv[1]}", file=sys.stderr)
+        return 1
+    except json.JSONDecodeError as e:
+        print(f"读不进 claim 文件：JSON 解析失败：{e}", file=sys.stderr)
         return 1
 
-    claim = (data.get("claim") or "").strip()
+    err = check_types(data)
+    if err:
+        return die(err)
+
+    claim = data["claim"].strip()
     sources = data.get("sources") or []
     fals = data.get("falsification") or {}
-    if not claim:
-        print("缺 claim 字段", file=sys.stderr)
-        return 1
 
     gaps = []  # 还差什么
     unknown = []  # 独立性未知的来源（单列，不计入来源根）
 
-    # v1.1：按 origin 归并来源根；origin 缺失/含"未知" → 独立性未知，不自动算独立，
+    # 按 origin 归并来源根；origin 缺失/含"未知" → 独立性未知，不自动算独立，
     # 每个未知来源自成一条"未知"项，绝不合并
     roots = {}  # origin -> [sources]
     for i, s in enumerate(sources, 1):
@@ -63,9 +111,6 @@ def main() -> int:
             continue
         roots.setdefault(origin, []).append((i, s))
 
-    n_roots = len(roots)
-    if n_roots < 2:
-        gaps.append(f"独立来源根只有 {n_roots} 个，协议要求 ≥2 个（同源转载合并计 1 条根）")
     for i, s in unknown:
         gaps.append(f"来源 {i}（{s.get('ref', '?')}）独立性未知，未计入来源根")
     for i, s in enumerate(sources, 1):
@@ -80,9 +125,8 @@ def main() -> int:
     if not (fals.get("result") or "").strip():
         gaps.append("证伪尝试没有记录结果")
 
-    # v1.2：立场显式校验（dot 增量静态复核驱动）——无支持证据 / 同根内立场矛盾 /
-    # 非法立场值，一律判"待核（材料存疑）"，不再静默落到 exit=0
-    VALID_STANCES = {"support", "contradict", "neutral"}
+    # 立场显式校验——无支持证据 / 同根内立场矛盾 / 非法立场值，
+    # 一律判"待核（材料存疑）"，不再静默落到 exit=0
     material_doubt = []  # 待核（材料存疑）的原因，exit=4
     root_stance_map = {}  # origin -> 根级立场（基于显式立场）
     for origin, members in roots.items():
@@ -114,6 +158,10 @@ def main() -> int:
         material_doubt.append(
             "没有任何独立来源根明确支持该结论（只有反对 / 中立证据），材料不足以核实")
 
+    # v1.3（dot 复核 point 1）：支持门槛只计算支持根；
+    # neutral / 未声明立场根只计材料，不计入支持门槛
+    n_support_roots = sum(1 for r in root_stance_map.values() if r == "support")
+
     contradicted = bool(fals.get("contradicted"))
     if contradicted:
         verdict, code = "被推翻", 3
@@ -123,23 +171,33 @@ def main() -> int:
     elif material_doubt:
         verdict, code = "待核（材料存疑）", 4
         gaps.extend(material_doubt)
+    elif n_support_roots < 2:
+        verdict, code = "未核实", 2
+        gaps.append(
+            f"明确支持的独立来源根只有 {n_support_roots} 个，协议要求 ≥2 "
+            "（只计算根立场=support 的根；neutral / 未声明立场根只计材料，不计入支持门槛）")
     elif gaps:
         verdict, code = "未核实", 2
     else:
-        verdict, code = "已核实（未被推翻）", 0
+        verdict, code = "材料检查通过（未被推翻）", 0
 
-    print("## 核查卡（协议 v1.2）\n")
+    print("## 核查卡（协议 v1.3）\n")
     print(f"**结论**：{claim}\n")
-    print("**口径声明**：本卡只检查「提交者填写的材料」（字段齐全性／来源独立性／立场一致性），"
-          "不代表事实本身已被核验；「已核实」=“按材料未被推翻”，不是“事实为真”。"
-          "origin 是提交者声明：填了不同 origin 本身不证明独立性，来源根计数基于声明分组。\n")
-    print(f"**来源根**：{n_roots} 个（共 {len(sources)} 条证据；同源转载合并计 1 条根）")
+    print("**口径声明**：本卡是「提交材料检查工具」，不是事实核验工具：它只检查"
+          "提交者填写的材料（字段齐全性／声明的来源独立性／立场一致性）。"
+          "判定「材料检查通过（未被推翻）」= 按提交材料通过了本协议检查，"
+          "不是“事实为真”。origin 是提交者声明：填了不同 origin 本身不证明独立性，"
+          "来源根计数基于声明分组。\n")
+    print(f"**来源根**：共 {len(roots)} 个（共 {len(sources)} 条证据；同源转载合并计 1 条根）")
+    print(f"**支持根**：{n_support_roots} 个（判定门槛要求 ≥2，只计算根立场=support 的根；"
+          "neutral / 未声明立场根只计材料）")
     if roots:
         for origin, members in roots.items():
             shown = sorted({str(s.get("stance")).strip()
                             if str(s.get("stance") or "").strip()
                             else "neutral（未声明）" for _, s in members})
-            dates = sorted({ (s.get("as_of") or "").strip() for _, s in members if (s.get("as_of") or "").strip() })
+            dates = sorted({(s.get("as_of") or "").strip() for _, s in members
+                            if (s.get("as_of") or "").strip()})
             print(f"- 根「{origin}」：{len(members)} 条证据，根立场={root_stance_map[origin]}"
                   f"（明细：{','.join(shown)}）" +
                   (f"，适用日期={','.join(dates)}" if dates else ""))
@@ -151,7 +209,8 @@ def main() -> int:
     if sources:
         for i, s in enumerate(sources, 1):
             origin = (s.get("origin") or "").strip() or "（独立性未知）"
-            print(f"- [来源 {i}·{s.get('path', '?')}] {s.get('ref', '?')}：「{(s.get('quote') or '（无摘录）').strip() or '（无摘录）'}」"
+            print(f"- [来源 {i}·{s.get('path', '?')}] {s.get('ref', '?')}："
+                  f"「{(s.get('quote') or '（无摘录）').strip() or '（无摘录）'}」"
                   f"（origin：{origin}）")
     else:
         print("- （无）")
