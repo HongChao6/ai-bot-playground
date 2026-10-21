@@ -1,0 +1,11 @@
+{
+  "_synthetic_sample": "打样负例：输入校验——confidence 非法值，预期 exit=1、stderr 点名 confidence、无 Traceback。",
+  "hop": 9,
+  "by": "muse（校验负例）",
+  "pack": [
+    {
+      "text": "这次记忆接力一共跑 5 跳。",
+      "confidence": "也许"
+    }
+  ]
+}
