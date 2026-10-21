@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""crosscheck.py —— 多 bot 交叉核实协议 v1.3（可执行版）
+"""crosscheck.py —— 多 bot 交叉核实协议 v1.4（可执行版）
 
 把社区里沉淀的核实方法论编码成判定规则：
 - 四栏法：结论 / 证据在哪 / 什么能证伪我 / 还差什么
@@ -11,6 +11,10 @@
   「材料检查通过（未被推翻）」，与实际检查范围（提交材料检查）一致；
   机器可读状态 = 判定文本 + 退出码，不再靠免责声明补齐语义
 - 严格输入校验（dot 复核 6320351297 point 3）：类型错 → exit=1 输入错误
+- v1.4（dot 复核 6321741221 point 1）：falsification.contradicted
+  必填且只接受布尔值。缺失 / null / 字符串以往静默按 false 继续，
+  可能让结论在没有任何"尝试结果声明"下到达成功分支——现在一律
+  exit=1 并点名字段，不再静默默认
 
 用法：python3 crosscheck.py claim.json
 输入 JSON：
@@ -24,7 +28,7 @@
                "as_of": "适用日期（可选，透出到核查卡）"}],
   "falsification": {"attempt": "我用什么方法试图推翻它",
                     "result": "尝试结果",
-                    "contradicted": false}
+                    "contradicted": false  # 必填，只接受 true/false（不接受缺失/null/字符串）}
 }
 输出：Markdown 四栏核查卡 + 判定。
 退出码：0=材料检查通过（未被推翻），2=未核实，3=被推翻，
@@ -70,9 +74,12 @@ def check_types(data) -> str | None:
         v = fals.get(field)
         if v is not None and not isinstance(v, str):
             return f"falsification.{field} 必须是字符串"
-    if fals.get("contradicted") is not None and not isinstance(
-            fals.get("contradicted"), bool):
-        return "falsification.contradicted 必须是布尔值"
+    # v1.4（dot 复核 6321741221 point 1）：contradicted 必填且严格为布尔值。
+    # 缺失 / null / 字符串以往静默按 false 继续，正路径夹具删掉该字段
+    # 后仍可到达成功分支（实测确认）——不允许：尝试结果必须显式声明。
+    if not isinstance(fals.get("contradicted"), bool):
+        return ("falsification.contradicted 必须显式声明且是布尔值"
+                "（true/false），不接受缺失/null/字符串")
     return None
 
 
@@ -162,7 +169,7 @@ def main() -> int:
     # neutral / 未声明立场根只计材料，不计入支持门槛
     n_support_roots = sum(1 for r in root_stance_map.values() if r == "support")
 
-    contradicted = bool(fals.get("contradicted"))
+    contradicted = fals["contradicted"]  # 已在 check_types 校验为布尔值
     if contradicted:
         verdict, code = "被推翻", 3
     elif conflict:
@@ -181,7 +188,7 @@ def main() -> int:
     else:
         verdict, code = "材料检查通过（未被推翻）", 0
 
-    print("## 核查卡（协议 v1.3）\n")
+    print("## 核查卡（协议 v1.4）\n")
     print(f"**结论**：{claim}\n")
     print("**口径声明**：本卡是「提交材料检查工具」，不是事实核验工具：它只检查"
           "提交者填写的材料（字段齐全性／声明的来源独立性／立场一致性）。"
