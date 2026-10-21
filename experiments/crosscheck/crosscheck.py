@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""crosscheck.py —— 多 bot 交叉核实协议 v1.1（可执行版）
+"""crosscheck.py —— 多 bot 交叉核实协议 v1.2（可执行版）
 
 把社区里沉淀的核实方法论编码成判定规则：
 - 四栏法：结论 / 证据在哪 / 什么能证伪我 / 还差什么
@@ -7,6 +7,8 @@
 - 证真 vs 证伪：必须实际做过一次推翻尝试；"过关"只算"未被推翻"，不算"证明为真"
 - v1.1 新增（dot 验收反例驱动）：origin 字段（同源合并计根）、stance 字段
   （support/contradict/neutral）、证据冲突判"证据冲突／待核"、独立性未知单列不自动算独立
+- v1.2 新增（dot 增量静态复核驱动）：立场显式校验——无支持证据/同根内立场矛盾/
+  非法立场值一律判"待核（材料存疑）"，不再落 exit=0；卡头声明"材料检查≠事实核验"
 
 用法：python3 crosscheck.py claim.json
 输入 JSON：
@@ -22,8 +24,9 @@
                     "result": "尝试结果",
                     "contradicted": false}
 }
-输出：Markdown 四栏核查卡 + 判定（已核实（未被推翻）/ 未核实 / 被推翻 / 证据冲突／待核）。
-退出码：0=已核实（未被推翻），2=未核实，3=被推翻，4=证据冲突／待核，1=输入错误。
+输出：Markdown 四栏核查卡 + 判定（已核实（未被推翻）/ 未核实 / 被推翻 / 证据冲突／待核 /
+待核（材料存疑））。
+退出码：0=已核实（未被推翻），2=未核实，3=被推翻，4=待核（含证据冲突与材料存疑），1=输入错误。
 """
 import json
 import sys
@@ -77,35 +80,68 @@ def main() -> int:
     if not (fals.get("result") or "").strip():
         gaps.append("证伪尝试没有记录结果")
 
-    # v1.1：独立来源根之间立场对立 → 证据冲突，不靠票数判真
-    stances = set()
+    # v1.2：立场显式校验（dot 增量静态复核驱动）——无支持证据 / 同根内立场矛盾 /
+    # 非法立场值，一律判"待核（材料存疑）"，不再静默落到 exit=0
+    VALID_STANCES = {"support", "contradict", "neutral"}
+    material_doubt = []  # 待核（材料存疑）的原因，exit=4
+    root_stance_map = {}  # origin -> 根级立场（基于显式立场）
     for origin, members in roots.items():
-        root_stances = { (s.get("stance") or "neutral").strip() for _, s in members }
-        if "contradict" in root_stances:
-            stances.add("contradict")
-        elif "support" in root_stances:
-            stances.add("support")
+        explicit = []
+        for _, s in members:
+            raw = s.get("stance")
+            if raw is None or not str(raw).strip():
+                continue  # 未声明 stance：按 neutral（未声明）参与根级立场计算
+            v = str(raw).strip()
+            if v not in VALID_STANCES:
+                material_doubt.append(
+                    f"来源「{s.get('ref', '?')}」的立场值非法（{v!r}），"
+                    "只接受 support / contradict / neutral")
+            else:
+                explicit.append(v)
+        if "support" in explicit and "contradict" in explicit:
+            # 同一 origin 内既有支持又有反对：显式记下，不许 elif 静默合并掉分歧
+            material_doubt.append(
+                f"来源根「{origin}」内部既有支持证据又有反对证据，分歧不可静默合并")
+        if "contradict" in explicit:
+            root_stance_map[origin] = "contradict"
+        elif "support" in explicit:
+            root_stance_map[origin] = "support"
+        else:
+            root_stance_map[origin] = "neutral"
+    stances = set(root_stance_map.values())
     conflict = ("contradict" in stances and "support" in stances)
+    if "support" not in stances:
+        material_doubt.append(
+            "没有任何独立来源根明确支持该结论（只有反对 / 中立证据），材料不足以核实")
 
     contradicted = bool(fals.get("contradicted"))
     if contradicted:
         verdict, code = "被推翻", 3
     elif conflict:
         verdict, code = "证据冲突／待核", 4
-        gaps.append("独立来源根之间证据对立，需保留适用日期与原文位置继续核实，不能按多数票判真")
+        gaps.append("独立来源根之间证据对立，需保留适用日期与原文位置继续核实，不能按证据数量判真")
+    elif material_doubt:
+        verdict, code = "待核（材料存疑）", 4
+        gaps.extend(material_doubt)
     elif gaps:
         verdict, code = "未核实", 2
     else:
         verdict, code = "已核实（未被推翻）", 0
 
-    print("## 核查卡（协议 v1.1）\n")
+    print("## 核查卡（协议 v1.2）\n")
     print(f"**结论**：{claim}\n")
+    print("**口径声明**：本卡只检查「提交者填写的材料」（字段齐全性／来源独立性／立场一致性），"
+          "不代表事实本身已被核验；「已核实」=“按材料未被推翻”，不是“事实为真”。"
+          "origin 是提交者声明：填了不同 origin 本身不证明独立性，来源根计数基于声明分组。\n")
     print(f"**来源根**：{n_roots} 个（共 {len(sources)} 条证据；同源转载合并计 1 条根）")
     if roots:
         for origin, members in roots.items():
-            mem_stances = { (s.get("stance") or "neutral").strip() for _, s in members }
+            shown = sorted({str(s.get("stance")).strip()
+                            if str(s.get("stance") or "").strip()
+                            else "neutral（未声明）" for _, s in members})
             dates = sorted({ (s.get("as_of") or "").strip() for _, s in members if (s.get("as_of") or "").strip() })
-            print(f"- 根「{origin}」：{len(members)} 条证据，立场={','.join(sorted(mem_stances))}" +
+            print(f"- 根「{origin}」：{len(members)} 条证据，根立场={root_stance_map[origin]}"
+                  f"（明细：{','.join(shown)}）" +
                   (f"，适用日期={','.join(dates)}" if dates else ""))
     if unknown:
         print("**独立性未知**（未计入来源根）：")
