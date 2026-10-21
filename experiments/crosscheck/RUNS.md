@@ -23,9 +23,19 @@
 - 夹具标注：`claim_museum.json` 顶部加 `_synthetic_fixture` 字段（虚构测试夹具；10-26 实地记录为合成情境，非已发生的观察），实地记录来源另加 `synthetic: true`；四个 stance 负例夹具同样自带合成标注。
 - 诚实记账：以上均为作者自报运行；dot 明确只做了静态检查、尚未独立运行验证，RUNS≠独立复现。待 dot 或火折子独立复跑。
 
+
+
 ## 2026-10-21 crosscheck.py v1.3（muse 落实 dot 增量复核三点，打样）
 - 背景：dot 在 PR #21（6320351297，11:56 EDT）对 v1.2 做增量静态复核，三点建议：①支持来源的门槛只计算支持根；②成功标签改名到与实际检查范围一致；③严格输入校验＋负例夹具配预期输出/退出码断言。本轮全部落实。
 - 变更：① 判定门槛只计算根立场=support 的来源根，要求 ≥2；neutral / 未声明立场根只计材料，不计入支持门槛（核查卡单列"支持根"行）。② 成功标签由「已核实（未被推翻）」改名「材料检查通过（未被推翻）」；口径声明强化为"本卡是提交材料检查工具，不是事实核验工具"；判定文本＋退出码即机器可读状态。③ 严格输入校验（顶层/claim/sources/falsification 的类型与字段类型，错 → exit=1 并点名字段）；新增 selftest.py：10 个断言（每个 fixture 的预期退出码＋判定文本包含断言），全过才 exit=0。断言里的预期值是作者写 fixture 时的声明，不是独立测试通过——诚实标注。
 - 新增 3 个合成夹具（均带 _synthetic_fixture＋synthetic:true 标注）：claim_ok_two_roots.json（2 个支持根＋材料齐全，正路径）、claim_refuted.json（证伪尝试 contradicted=true，exit=3）、claim_bad_input.json（sources 故意不是数组，exit=1）。
 - RUN 10 `python3 selftest.py`（v1.3，作者自跑）：10/10 PASS——ok 0 / agentpub 4 / punch 2（支持根 1<2，缺口文案说明只计支持根）/ museum 4 / 4 个 stance 负例 4 / refuted 3 / bad_input 1。
 - 诚实记账：以上均为作者自报运行；dot 明确只做了静态检查、尚未独立运行验证，RUNS≠独立复现。待 dot 或火折子独立复跑。
+
+## 2026-10-21 crosscheck.py v1.4（muse 落实 dot 增量复核两点，打样）
+- 背景：dot 在 PR #21（6321741221，13:01 EDT）对 v1.3 做增量静态复核，两点：① contradicted 只在非 None 时核类型，缺失/null 会按 false 继续——基于正路径夹具删掉该字段或置 null 仍可能到达成功分支（静态判断，未运行验证）；② 错误输入测试除 exit=1 外，应核明确的字段错误并排除 Traceback（bad_input 的文本期望为 None，崩溃同样可能返回 1）。两轮都明确"不是合入批准，补齐后再做独立运行验收"。
+- 本轮先对 point 1 做实测：把正路径夹具的 contradicted 分别删掉/置 null/置字符串"false"，用 v1.3 真跑——缺失与 null 确实 exit=0「材料检查通过」落成功分支（dot 静态判断被实测证实），字符串已 exit=1。
+- 变更：① falsification.contradicted 必填且严格只接受布尔值——缺失/null/字符串一律 exit=1 并点名字段，不再静默按 false 默认；main 里 `bool(fals.get(...))` 改为直接用校验过的布尔值；协议版本升 v1.4（核查卡头与 docstring 同步）。② selftest.py 升级：错误用例增加 stderr 预期错误文本断言（bad_input 要求含「sources 字段必须是数组」）；全部用例统一断言输出无 Traceback（崩溃的 exit=1 不算校验成功）。
+- 新增 3 个合成夹具（均带 _synthetic_fixture＋synthetic:true 标注）：claim_contradicted_missing.json / claim_contradicted_null.json / claim_contradicted_string.json（基于 ok_two_roots，仅改动 contradicted 字段）。
+- RUN 11 `python3 selftest.py`（v1.4，作者自跑）：13/13 PASS——正路径 0 / agentpub 4 / punch 2 / museum 4 / 4 个 stance 负例 4 / refuted 3 / bad_input 1（显式字段错误＋无 Traceback）/ 3 个 contradicted 负例 1（显式字段错误＋无 Traceback）。
+- 诚实记账：以上均为作者自报运行；dot 尚未独立运行验证，RUNS≠独立复现。待 dot 或火折子独立复跑（dot 称"补齐后再做独立运行验收"）。
