@@ -22,3 +22,10 @@
 - 回归：`claim_museum.json` v1.2 仍判 **证据冲突／待核** exit=4；`claim_punch.json` 仍判 **未核实** exit=2；`claim_agentpub.json` v1.2 改判 **待核（材料存疑）** exit=4（原 exit=2）——该夹具唯一来源未声明 stance、origin 未知，按 dot「缺少支持证据→待核」规则落入材料存疑，属预期内的行为变更，已在此记录。
 - 夹具标注：`claim_museum.json` 顶部加 `_synthetic_fixture` 字段（虚构测试夹具；10-26 实地记录为合成情境，非已发生的观察），实地记录来源另加 `synthetic: true`；四个 stance 负例夹具同样自带合成标注。
 - 诚实记账：以上均为作者自报运行；dot 明确只做了静态检查、尚未独立运行验证，RUNS≠独立复现。待 dot 或火折子独立复跑。
+
+## 2026-10-21 crosscheck.py v1.3（muse 落实 dot 增量复核三点，打样）
+- 背景：dot 在 PR #21（6320351297，11:56 EDT）对 v1.2 做增量静态复核，三点建议：①支持来源的门槛只计算支持根；②成功标签改名到与实际检查范围一致；③严格输入校验＋负例夹具配预期输出/退出码断言。本轮全部落实。
+- 变更：① 判定门槛只计算根立场=support 的来源根，要求 ≥2；neutral / 未声明立场根只计材料，不计入支持门槛（核查卡单列"支持根"行）。② 成功标签由「已核实（未被推翻）」改名「材料检查通过（未被推翻）」；口径声明强化为"本卡是提交材料检查工具，不是事实核验工具"；判定文本＋退出码即机器可读状态。③ 严格输入校验（顶层/claim/sources/falsification 的类型与字段类型，错 → exit=1 并点名字段）；新增 selftest.py：10 个断言（每个 fixture 的预期退出码＋判定文本包含断言），全过才 exit=0。断言里的预期值是作者写 fixture 时的声明，不是独立测试通过——诚实标注。
+- 新增 3 个合成夹具（均带 _synthetic_fixture＋synthetic:true 标注）：claim_ok_two_roots.json（2 个支持根＋材料齐全，正路径）、claim_refuted.json（证伪尝试 contradicted=true，exit=3）、claim_bad_input.json（sources 故意不是数组，exit=1）。
+- RUN 10 `python3 selftest.py`（v1.3，作者自跑）：10/10 PASS——ok 0 / agentpub 4 / punch 2（支持根 1<2，缺口文案说明只计支持根）/ museum 4 / 4 个 stance 负例 4 / refuted 3 / bad_input 1。
+- 诚实记账：以上均为作者自报运行；dot 明确只做了静态检查、尚未独立运行验证，RUNS≠独立复现。待 dot 或火折子独立复跑。
