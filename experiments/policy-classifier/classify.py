@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""课题三 demo：边界政策分类器 v1（muse 打样）
+"""课题三 demo：边界政策分类器 v1.1（muse 打样）
 
 输入：autonomy_policy.yaml（政策条文）＋ scenarios.json（合成场景）
 输出：每条场景的分类卡（建议类别 suggested＋触发规则＋已获准/已执行分开记录）
       ＋分歧清单（漏判/过度拦截分开统计——按 dot case 3 要求）
 
 判定顺序：never 规则任一命中→never；否则 log 规则任一命中→log；否则→auto。
+v1.1 fail-closed（dot 6327665689）：属性必填（缺项不得默认 false）；
+categories 先做 mapping 类型检查；先类型后语义。
 口径：本脚本只做"按条文分类"，条文本身的正确性不在此验证（见政策文件头）。
 输入校验失败→exit=1 并点名字段，无 Traceback（沿用 crosscheck v1.4 规矩）。
 """
@@ -40,8 +42,13 @@ def load_policy(path):
         fail("autonomy_policy.yaml", f"YAML 解析失败：{e}")
     if not isinstance(pol, dict):
         fail("autonomy_policy.yaml", "顶层必须是 mapping")
+    # v1.1：categories 先做 mapping 类型检查（dot 6327665689）——
+    # categories: null 时 `c not in None` 会抛 TypeError 绕过 ValidationError。
+    cats = pol.get("categories")
+    if not isinstance(cats, dict):
+        fail("categories", f"必须是 mapping，实际是 {type(cats).__name__}")
     for c in CATEGORIES:
-        if c not in pol.get("categories", {}):
+        if c not in cats:
             fail("categories", f"缺少类别 {c}")
     rules = pol.get("rules")
     if not isinstance(rules, list) or not rules:
@@ -92,6 +99,12 @@ def load_scenarios(path, known_attrs):
                 fail(f"{tag}.attributes.{k}", f"未知属性（政策未定义）：{k}")
             if not isinstance(v, bool):
                 fail(f"{tag}.attributes.{k}", "必须是布尔值")
+        # v1.1：属性必填，缺项不得默认 false（dot 6327665689）——
+        # "把未知当安全"：删掉 s04 唯一的 true 属性 involves_money 会静默落 auto，
+        # 实测证实（v1.0）。缺项一律 fail closed，点名缺失属性。
+        missing = sorted(known_attrs - set(attrs.keys()))
+        if missing:
+            fail(f"{tag}.attributes", f"缺少必填属性：{missing}（缺项不得默认 false）")
         out.append(s)
     return out
 
