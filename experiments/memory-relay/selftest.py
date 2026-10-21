@@ -2,6 +2,8 @@
 """selftest.py —— memory_relay_score.py 的回归断言（muse 打样）。
 预期值是作者写合成样本时的声明，不是独立验证；正式实验前欢迎成员改写/加例。
 全部通过才 exit=0。v0.2 新增：数字边界匹配、严格输入校验负例、审计注分离。
+v0.3 新增：5/5.5 边界、数字否定 guard、类型先校验后查枚举、顶层类型校验、
+confidence 缺失政策断言（缺失=允许，按"不明"处理）。
 """
 import json
 import subprocess
@@ -19,6 +21,15 @@ CASES = [
     # 审计注条目：不参与匹配、不计臆造
     ("hop_audit_pack.json", {"retained": 10, "deformed": 1, "lost": 1, "fabricated": 1,
                              "severe_flips": 1, "retention_rate": 0.833, "audit_notes": 1}),
+    # 5/5.5 边界：整数关键词"5"不应命中"5.5"（dot 6326331117）
+    ("hop3_numeric55_pack.json", {"retained": 9, "deformed": 2, "lost": 1, "fabricated": 1,
+                                  "severe_flips": 1, "retention_rate": 0.75, "audit_notes": 0}),
+    # 否定表达反例："根本没有5跳" 不算记住 "5跳"（dot 6326331117）
+    ("hop_negation_pack.json", {"retained": 9, "deformed": 2, "lost": 1, "fabricated": 1,
+                                "severe_flips": 1, "retention_rate": 0.75, "audit_notes": 0}),
+    # confidence 缺失：允许，按"不明"处理，统计与 hop1 一致
+    ("hop_missing_conf_pack.json", {"retained": 10, "deformed": 1, "lost": 1, "fabricated": 1,
+                                    "severe_flips": 1, "retention_rate": 0.833, "audit_notes": 0}),
 ]
 
 fails = []
@@ -88,9 +99,50 @@ if hop["stats"]["audit_notes"] != 1:
 if any("审计注" in x for x in hop["fabricated"]):
     fails.append("审计注: 不应被计入臆造")
 
+# 行为断言：5/5.5 边界（dot 6326331117）
+r = run(["seed_facts.json", "hop3_numeric55_pack.json"])
+hop = json.loads(r.stdout)["hops"][0]
+if "f01" in hop["retained"]:
+    fails.append("5/5.5 反例: 5.5跳 不应被判为 f01（5跳）的完整留存")
+deformed_ids = {d["id"] for d in hop["deformed"]}
+if "f01" not in deformed_ids:
+    fails.append("5/5.5 反例: f01 应落入变形")
+kinds = " ".join("/".join(d.get("kinds", [])) for d in hop["deformed"] if d["id"] == "f01")
+if "数值变化/缺失" not in kinds:
+    fails.append("5/5.5 反例: f01 变形种类应标注 数值变化/缺失")
+
+# 行为断言：否定表达反例（dot 6326331117）
+r = run(["seed_facts.json", "hop_negation_pack.json"])
+hop = json.loads(r.stdout)["hops"][0]
+if "f01" in hop["retained"]:
+    fails.append("否定反例: '根本没有5跳' 不应被判为 f01 的留存")
+
+# 行为断言：confidence 缺失 = 允许，按"不明"处理（dot 6326331117）
+r = run(["seed_facts.json", "hop_missing_conf_pack.json"])
+if r.returncode != 0:
+    fails.append(f"缺失政策: confidence 缺失应允许，exit 应为 0，实际 exit={r.returncode}")
+if "Traceback" in (r.stdout + r.stderr):
+    fails.append("缺失政策: 输出不应含 Traceback")
+
+# 行为断言：类型先校验后查枚举（dot 6326331117）——一律 exit=1、点名字段、无 Traceback
+type_cases = [
+    ("hop_bad_conftype_pack.json", "confidence", ["seed_facts.json", "hop_bad_conftype_pack.json"]),
+    ("seed_bad_status_type.json", "status", ["seed_bad_status_type.json", "hop1_pack.json"]),
+    ("seed_top_array.json", "顶层", ["seed_top_array.json", "hop1_pack.json"]),
+    ("seed_top_null.json", "顶层", ["seed_top_null.json", "hop1_pack.json"]),
+]
+for name, field, args in type_cases:
+    r = run(args)
+    if r.returncode != 1:
+        fails.append(f"类型校验 {name}: 应 exit=1，实际 exit={r.returncode}")
+    if field not in r.stderr:
+        fails.append(f"类型校验 {name}: stderr 应点名 {field}")
+    if "Traceback" in (r.stdout + r.stderr):
+        fails.append(f"类型校验 {name}: 输出不应含 Traceback")
+
 if fails:
     print("FAIL:")
     for f in fails:
         print(" -", f)
     sys.exit(1)
-print("selftest: 全部通过（%d 个 hop 样本 + 9 条行为断言；预期值为作者声明，非独立验证）" % len(CASES))
+print("selftest: 全部通过（%d 个 hop 样本 + 行为断言；预期值为作者声明，非独立验证）" % len(CASES))
