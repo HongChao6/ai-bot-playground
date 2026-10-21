@@ -16,17 +16,28 @@
 评分规则（muse 打样版 v0.2，欢迎在 #6 议清后改）:
   - 关键词匹配：hop 文本命中种子事实关键词 >= 50% 即认定对应（关键词支持 | 同义备选）；关键词全部命中
     且置信度无升降 -> 留存；部分命中 -> 变形（内容缺损）。
-  - 数字边界匹配（v0.2，dot 验收要求）：纯数字关键词（5、24、0.6、20261022 等）用数字边界
-    匹配，不做裸子串匹配——"5" 不命中 "15"、"15" 不命中 "5"。非数字关键词仍用子串匹配
-    （中文无词边界，数字边界只保证数值不串位）。覆盖 <1 且缺失的关键词是数字时，
+    评分规则（muse 打样版 v0.3，欢迎在 #6 议清后改）:
+  - 关键词匹配：hop 文本命中种子事实关键词 >= 50% 即认定对应（关键词支持 | 同义备选）；关键词全部命中
+    且置信度无升降 -> 留存；部分命中 -> 变形（内容缺损）。
+  - 数字边界匹配（v0.2 起，dot 验收要求）：纯数字关键词（5、24、0.6、20261022 等）用数字边界
+    匹配，不做裸子串匹配——"5" 不命中 "15"、"15" 不命中 "5"。v0.3 补：整数关键词不命中
+    小数（"5" 不命中 "5.5"，但关键词 "5.5" 命中 "5.5"）；纯数字关键词被否定表达直接修饰
+    （"没有5跳"）时该命中不计——否定词只查匹配点紧邻前 2 字（没/不/未/非/无/莫/毋/别＋没有/并非/
+    不是/无法/并未/不能）。非数字关键词的否定仍是启发式已知局限，见口径声明。
+    非数字关键词仍用子串匹配（中文无词边界，数字边界只保证数值不串位）。覆盖 <1 且缺失的关键词是数字时，
     变形种类加记「数值变化/缺失」。
   - 未确认->已确认 的状态翻转 = 严重变形（dot 验收要求，单独计数）。
   - 已确认->未确认/不明 = 变形（置信降级）。
   - 无对应种子事实的 hop 条目 = 臆造项，单独计数，不计入留存率分子。
   - 留存率 = 留存条数 / 种子事实总数。
-  - 严格输入校验（v0.2，dot 验收要求）：confidence 只接受 已确认/未确认/不明；
-    种子事实 id/text/status/keywords 必填且类型正确；违反 -> stderr 点名字段、exit=1、
-    无 Traceback。
+  - 严格输入校验（v0.2 起，dot 验收要求；v0.3 补校验顺序）：先校验类型再查枚举——
+    confidence 缺失 = 允许，按"不明"处理（政策已明确）；confidence 非字符串或值非法
+    -> exit=1 点名字段；种子 status 非字符串 -> exit=1 点名；种子/hop 文件顶层非对象
+    -> exit=1 点名"顶层"；一律无 Traceback。
+  - 隔离规则（v0.3，dot 验收要求："不参与评分" ≠ "下一跳看不到"）：评分时排除
+    audit_note 只做"不参与评分"；盲测隔离靠材料管理——接力可见的 retelling 文本不得含
+    任何审计信息（原始状态/丢失项/打分标准/测试点说明），这些只进裁判侧材料（README）。
+    脚本无法约束人读什么，这条是流程规则，不是代码规则。
 
 输出：JSON（默认）或 --card 生成 Markdown 核查卡。
 退出码：0 打分完成；1 输入校验失败；2 用法错误。
@@ -41,9 +52,15 @@ MATCH_THRESHOLD = 0.5
 
 PUNCT = re.compile(r"[\s ，。、；：…—\-\"'""''（）()【】《》!！?？·]+")
 DIGIT_PART = re.compile(r"^\d+(\.\d+)?$")
+NUMERIC_PAT_FMT = r"(?<![\d.]){}(?!\d|\.\d)"
 
 VALID_CONF = {"已确认", "未确认", "不明"}
 VALID_STATUS = {"已确认", "未确认"}
+
+# 否定表达 guard（只用于纯数字关键词，见 part_matches）：
+# 数字匹配点紧邻前方（2 字内）出现否定词，视为"被否定修饰"，该次命中不计。
+NEG_CHARS = "没不未非无莫毋别"
+NEG_WORDS = ("没有", "并非", "不是", "无法", "并未", "不能")
 
 
 class InputError(Exception):
@@ -55,9 +72,23 @@ def norm(s):
 
 
 def part_matches(part, text):
-    """数字纯键用数字边界匹配（防 5 命中 15），其余子串匹配。"""
+    """数字纯键用数字边界匹配（防 5 命中 15、5 命中 5.5），其余子串匹配。
+
+    纯数字键另带否定表达 guard：紧邻匹配点前方 2 字内出现否定词（没有/并非/不是/
+    无法/并未/不能/没/不/未/非/无/莫/毋/别），则该次命中不计——"没有5跳"不算记住
+    "5跳"。guard 只作用于数字键：非数字关键词里否定常是规则原文的一部分
+    （"不能回看"本身就是事实），启发式无法区分修饰与陈述，故明确声明为已知局限。
+    """
     if DIGIT_PART.match(part):
-        return re.search(r"(?<!\d)" + re.escape(part) + r"(?!\d)", text) is not None
+        pat = NUMERIC_PAT_FMT.format(re.escape(part))
+        for m in re.finditer(pat, text):
+            before = text[:m.start()]
+            if any(before.endswith(w) for w in NEG_WORDS):
+                continue
+            if before and before[-1] in NEG_CHARS:
+                continue
+            return True
+        return False
     return part in text
 
 
@@ -69,6 +100,8 @@ def load_seed(path):
         raise InputError(f"打不开种子文件：{path}")
     except json.JSONDecodeError as e:
         raise InputError(f"种子文件 {path} 不是合法 JSON：第 {e.lineno} 行附近")
+    if not isinstance(d, dict):
+        raise InputError(f"种子文件 {path} 顶层必须是对象，实际是 {type(d).__name__}")
     facts = d.get("facts")
     validate_seed(facts)
     return facts
@@ -88,8 +121,13 @@ def validate_seed(facts):
             raise InputError(f"{loc} 的 id 必须是非空字符串")
         if not isinstance(f["text"], str) or not f["text"]:
             raise InputError(f"{loc} 的 text 必须是非空字符串")
-        if f["status"] not in VALID_STATUS:
-            raise InputError(f"{loc} 的 status 非法：{f.get('status')!r}，只能是 已确认/未确认")
+        # v0.3：先校验类型再查枚举。status 是数组/对象时直接 in 集合会抛
+        # TypeError（不可哈希），且不在 InputError 捕获范围内（dot 6326331117）。
+        status = f["status"]
+        if not isinstance(status, str):
+            raise InputError(f"{loc} 的 status 类型非法：{type(status).__name__}，只能是字符串")
+        if status not in VALID_STATUS:
+            raise InputError(f"{loc} 的 status 非法：{status!r}，只能是 已确认/未确认")
         kws = f["keywords"]
         if not isinstance(kws, list) or not kws or not all(isinstance(k, str) and k for k in kws):
             raise InputError(f"{loc} 的 keywords 必须是非空字符串数组")
@@ -120,7 +158,11 @@ def validate_hop(path, hop_no, pack):
             raise InputError(f"{eloc} 必须是对象")
         if "text" not in e or not isinstance(e["text"], str) or not e["text"]:
             raise InputError(f"{eloc} 缺 text 或 text 非字符串")
+        # v0.3：confidence 缺失 = 允许，按"不明"处理（政策已明确）；先校验类型
+        # 再查枚举——数组/对象进 in 集合会抛 TypeError（dot 6326331117）。
         conf = e.get("confidence", "不明")
+        if not isinstance(conf, str):
+            raise InputError(f"{eloc} 的 confidence 类型非法：{type(conf).__name__}，只能是字符串")
         if conf not in VALID_CONF:
             raise InputError(f"{eloc} 的 confidence 非法：{conf!r}，只能是 已确认/未确认/不明")
         if "audit_note" in e and not isinstance(e["audit_note"], bool):
@@ -223,7 +265,8 @@ def card(seed, results):
         for fb in r["fabricated"]:
             lines.append("  - 臆造：%s" % fb)
         lines.append("")
-    lines.append("口径：关键词启发式匹配（数字纯键用数字边界），分数仅为按规则测量；以上均为合成打样，非成员真实参与。")
+    lines.append("口径：关键词启发式匹配（数字纯键用数字边界＋否定 guard，非数字键否定"
+               "仍是已知局限），分数仅为按规则测量；以上均为合成打样，非成员真实参与。")
     return "\n".join(lines)
 
 
