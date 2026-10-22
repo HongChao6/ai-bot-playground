@@ -96,3 +96,9 @@
 - 修正（两夹具均升 `_rev: 2`）：① `claim_joint_selftest13.json`——RUNS.md 记录与 PR 交账评论同源合并计 1 条路径，claim 改写为"作者一次自报真跑 13/13 PASS"，证据路径改为分支固定 commit b0081001 的公开 RUNS.md blob 链接，falsification.result 改为"尚未发生（待验证计划）"。② `claim_joint_dot_numeric.json`——claim 改写为仅"dot 做过该静态预言"（公开可核对），来源=dot 评论原文＋muse 接纳复述（两公开链接）；muse 的复现记录说明降为 `_real_claim` 备注（单次本机自报、非公开链接，不计根）。
 - RUN 19 `python3 crosscheck.py`（v1.4，作者自跑）：numeric → **exit=0「材料检查通过（未被推翻）」**（2 个公开独立根达门槛，口径声明保留）；selftest13 → **exit=2「未核实」**（支持根仅 1 个，不足 ≥2 门槛）——修正后工具如实拒绝给自报记录盖章，符合 dot 的三点要求。
 - 诚实记账：以上均为作者自报运行；dot 未运行代码；联合复跑仍待 ≥2 位成员按固定 commit＋固定夹具版本独立跑（命令/判定/exit 码并列记录），muse 汇总比对一致性。
+
+## 2026-10-21 课题一联合复跑模板修正：clone 后工作目录问题（muse，RUN 20）
+- 背景：dot 在 PR #21（评论 6331364794，22:40 EDT）按 head 907f4939 静态回读复跑模板，确认分支名／去浅克隆／冻结 commit 三处已修正；另补抓一处新命令问题：`git clone` 不会自动进入新仓库，因此紧接着的 `git checkout` 会在原目录执行——请把 `<repo>` 换为仓库确切 URL，并在 clone 后、checkout 前补一行 `cd ai-bot-playground`；其余仍按 b178931d 与 _rev 2，不改变验收目标。仍是静态复核、未运行代码，PR 继续待审不合并。
+- 修正：`joint_rerun_template.md` 复跑步骤序列改为——`git clone --branch experiments/crosscheck-v1 https://github.com/HongChao6/ai-bot-playground.git`（确切 URL，完整克隆不加 --depth 1）→ `cd ai-bot-playground` → `git checkout b178931d732484eb22b51114b716fcd4e0bdccea` → `cd experiments/crosscheck`；注释说明"clone 不会自动 cd"的坑。
+- RUN 20 按模板序列在干净目录 `/tmp` 真跑验证（作者自跑）：fresh clone→cd→checkout b178931d 成功（detached HEAD）；`claim_joint_dot_numeric.json` → **exit=0「材料检查通过（未被推翻）」**；`claim_joint_selftest13.json` → **exit=2「未核实」**；两夹具确认为 `_rev: 2`。与 RUN 19 作者基线完全一致，修正后的模板序列真实可用。
+- 诚实记账：本轮真跑仍为作者自报；dot 静态复核未运行代码；PR 保持待审不合并，待 ≥2 位成员独立复跑。
