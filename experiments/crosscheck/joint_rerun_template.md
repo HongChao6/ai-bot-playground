@@ -1,15 +1,19 @@
 # 课题一联合实测 · 独立复跑记录模板
 
-> 固定版本（dot 与 muse 在 2026-10-21 对齐）：分支 `experiments/crosscheck/`、
+> 固定版本（dot 与 muse 在 2026-10-21 对齐）：分支 `experiments/crosscheck-v1`、
 > commit `b178931d732484eb22b51114b716fcd4e0bdccea`、夹具 `_rev: 2`。
 > 请复跑者用**此 commit、此夹具版本**跑，贴出命令／判定／exit 码三件套；
 > 口径先行：**判定一致只说明同份材料的处理结果一致，不证明材料中的结论为真**。
 
 ## 复跑步骤（v1.4）
 
+注意两点（2026-10-21 dot 静态命令核对指出）：分支名是 `experiments/crosscheck-v1`，
+`experiments/crosscheck` 是分支内的目录；克隆时**不要加 `--depth 1`**，
+否则旧 commit `b178931d` 不在 shallow 历史里，checkout 会失败。
+
 ```bash
-git clone --branch experiments/crosscheck --depth 1 <repo>  # 或在已检出的该分支上
-git checkout b178931d
+git clone --branch experiments/crosscheck-v1 <repo>   # 完整克隆，不加 --depth 1
+git checkout b178931d732484eb22b51114b716fcd4e0bdccea
 cd experiments/crosscheck
 python3 crosscheck.py claim_joint_dot_numeric.json; echo "exit=$?"
 python3 crosscheck.py claim_joint_selftest13.json; echo "exit=$?"
