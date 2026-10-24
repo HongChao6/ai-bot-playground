@@ -8,6 +8,9 @@
   默认"多因素／尚不能归因"；三分是检查线索，不是必须填满的结论。
 - 本脚本绝不自动写因果结论——RUN 52 教训："一致数变化即条文改动的真实影响"
   是草率写法，已撤回（dot 6375993807）。
+- 范围说明（dot 6378908461）：A/B 两边复用同一个已导入的 classify.py（同一实现），
+  因此本脚本做的是"同实现下的政策/场景输入对照"，不是两份历史实现或
+  历史运行已经验收的比较；无需为此扩大协议或提供私有材料。
 
 用法：
     python3 compare_runs.py <policyA> <scenariosA> <policyB> <scenariosB> [--out card.json]
@@ -44,6 +47,19 @@ def canon(scenario):
 def run_side(policy_path, scen_path):
     pol, known = clf.load_policy(policy_path)
     scenarios = clf.load_scenarios(scen_path, known)
+    # dot 6378908461：第 47–55 行用案例 ID 作字典键，load_scenarios 没有唯一性检查；
+    # 重复 ID 会被后项静默覆盖、缩小共同案例数和分母。在生成字典前拒绝重复 ID，
+    # 点名 id 字段与重复值，不改 classify.py 的载荷校验口径。
+    seen, dups = set(), set()
+    for s in scenarios:
+        sid = s["id"]
+        if sid in seen:
+            dups.add(sid)
+        seen.add(sid)
+    if dups:
+        print(f"输入错误：{scen_path} 存在重复的 id 字段（案例 ID 不唯一）："
+              f"{sorted(dups)}；请先去重再对比", file=sys.stderr)
+        sys.exit(1)
     rows = {}
     for s in scenarios:
         suggested, fired = clf.classify(s, pol["rules"])
@@ -102,7 +118,12 @@ def main():
         else:
             condition = "输入已改写（另看覆盖，不混入对照组一致率）"
         clues = {"规则变化": policy_changed, "实现变化": impl_changed, "预期变化": expected_changed}
-        attribution = "无变化项" if not suggested_changed else UNATTRIBUTED
+        # dot 6378908461：第 95–105 行 suggested 不变就写"无变化项"，但 expected 单独变化
+        # 可能改变与作者预期的一致结果。改写为"建议类别未变"更准确；expected 变单独保留
+        # 一条"作者预期变更"的独立说明，不能读成规则改进。
+        attribution = "建议类别未变" if not suggested_changed else UNATTRIBUTED
+        expected_note = ("作者预期变更（独立说明，不读作规则改进）"
+                         if expected_changed else "")
         card_rows.append({
             "id": sid,
             "比较条件变化": condition,
@@ -111,6 +132,7 @@ def main():
             "A_fired": ra["fired_rules"], "B_fired": rb["fired_rules"],
             "归因检查线索": clues,
             "归因项": attribution,
+            "预期说明": expected_note,
         })
 
     card = {
@@ -123,6 +145,8 @@ def main():
             "实现": {"classify.py": a["impl_hash"][:12], "A与B一致": not impl_changed,
                      "python": sys.version.split()[0]},
             "诚实边界": "本卡仅记录两组自报运行的对照；不自动归因；独立核验待成员完成。",
+            "范围": "A/B 复用同一个已导入的 classify.py（同一实现）；本卡是同实现下的政策/场景"
+                    "输入对照，不是两份已验收的历史实现或历史运行的比较（dot 6378908461）。",
         },
         "对照组": {"共同案例数": len(common), "其中输入未变": n_cmp,
                    "建议类别前后一致": f"{n_same}/{n_cmp}",
@@ -139,8 +163,9 @@ def main():
     print(f"  覆盖组（另看）：新增 {added or '无'}，删除 {removed or '无'}")
     print(f"  规则变化：{policy_changed}｜实现变化：{impl_changed}｜Python {sys.version.split()[0]}")
     for r in card_rows:
+        extra = f"｜{r['预期说明']}" if r["预期说明"] else ""
         print(f"  [{r['id']}] {r['比较条件变化']}｜A={r['A_suggested']} B={r['B_suggested']}｜"
-              f"预期 {r['A_expected']}→{r['B_expected']}｜归因项：{r['归因项']}")
+              f"预期 {r['A_expected']}→{r['B_expected']}｜归因项：{r['归因项']}{extra}")
     print("  禁止的写法：一致数变化不直接记为条文影响。以上均为作者自报运行。")
 
 
