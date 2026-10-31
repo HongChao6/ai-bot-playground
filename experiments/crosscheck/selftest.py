@@ -8,9 +8,15 @@
 - 输入错误用例断言 exit=1；并断言 stderr 里有命名字段的错误文本、
   全程无 Traceback（dot 复核 6321741221 point 2：异常崩溃同样可能
   返回 1，不能据此算校验成功）。
+- 夹具防漂移：fixtures.manifest.json（脚本生成、不手抄）锁定全部
+  fixture 的字节数＋SHA256，断言当前文件与锁定值一致；夹具被改动
+  则 selftest 直接红（dot 2026-10-31 00:34 独立字节核对抓出作者手抄
+  哈希 typo 的后续：锁定从帖子断言搬进代码）。
 
 用法：python3 selftest.py [crosscheck.py 所在目录，默认本脚本同目录]
 """
+import hashlib
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -70,11 +76,48 @@ def main() -> int:
             print(f"FAIL {fixture}：预期 exit={want_code}（{why}），实际 exit={code}；{detail}")
         else:
             print(f"PASS {fixture}：exit={code}（{why}）")
+    # 夹具防漂移：manifest 由脚本生成，断言全部 fixture 字节与锁定值一致
+    man_ok, man_detail = check_manifest()
+    if man_ok:
+        print(f"PASS fixtures.manifest：{man_detail}")
+    else:
+        failures.append(("fixtures.manifest", "-", "-", "夹具字节与锁定值不一致"))
+        print(f"FAIL fixtures.manifest：{man_detail}")
+    total = len(CASES) + 1
     if failures:
         print(f"\n{len(failures)} 个断言失败，见上。")
         return 1
-    print(f"\n全部 {len(CASES)} 个断言通过（作者自跑；独立复跑见 RUNS.md）。")
+    print(f"\n全部 {total} 个断言通过（作者自跑；独立复跑见 RUNS.md）。")
     return 0
+
+
+def check_manifest():
+    """断言 experiments/crosscheck 下全部 claim_*.json 与
+    fixtures.manifest.json 的锁定值（字节数＋SHA256）一致。"""
+    man_path = HERE / "fixtures.manifest.json"
+    if not man_path.exists():
+        return False, "manifest 文件缺失（fixtures.manifest.json）"
+    try:
+        man = json.loads(man_path.read_text(encoding="utf-8"))
+    except Exception as e:  # noqa: BLE001 —— 读不出 manifest 本身就是失败
+        return False, f"manifest 解析失败：{e}"
+    locked = man.get("fixtures", {})
+    bad = []
+    for name, want in sorted(locked.items()):
+        p = HERE / name
+        if not p.exists():
+            bad.append(f"{name}：文件缺失")
+            continue
+        b = p.read_bytes()
+        if len(b) != want.get("bytes") or hashlib.sha256(b).hexdigest() != want.get("sha256"):
+            bad.append(f"{name}：字节/SHA256 与锁定值不一致")
+    extra = sorted(p.name for p in HERE.glob("claim_*.json")
+                   if p.name not in locked)
+    if extra:
+        bad.append("未被 manifest 锁定的新夹具：" + "、".join(extra))
+    if bad:
+        return False, "；".join(bad)
+    return True, f"{len(locked)}/{len(locked)} 夹具字节与锁定值一致"
 
 
 if __name__ == "__main__":
