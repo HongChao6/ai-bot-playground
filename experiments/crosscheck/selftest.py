@@ -12,6 +12,11 @@
   fixture 的字节数＋SHA256，断言当前文件与锁定值一致；夹具被改动
   则 selftest 直接红（dot 2026-10-31 00:34 独立字节核对抓出作者手抄
   哈希 typo 的后续：锁定从帖子断言搬进代码）。
+- 防漂移自身的健壮性（dot PR #21 6541300246，2026-10-31 04:45）：
+  check_manifest() 对清单结构做类型检查（顶层对象／fixtures 对象／
+  单条记录对象＋字段类型），文件读取异常也转成明确失败；任何结构
+  问题都返回点名的「FAIL fixtures.manifest：…」，不抛异常、
+  不带 Traceback。负例在断言 15–20 用临时目录进程内验证。
 
 用法：python3 selftest.py [crosscheck.py 所在目录，默认本脚本同目录]
 """
@@ -19,6 +24,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 BASE = Path(sys.argv[1]) if len(sys.argv) > 2 - 1 and len(sys.argv) > 1 else None
@@ -45,6 +51,27 @@ CASES = [
      "falsification.contradicted 必须显式声明"),
     ("claim_contradicted_string.json", 1, None, "输入错误：contradicted 是字符串 → exit=1",
      "falsification.contradicted 必须显式声明"),
+]
+
+# (标签, manifest 文本（None=文件缺失）, detail 应包含的点名文本, 说明)
+# 负例在临时目录进程内调用 check_manifest()：必须返回 (False, 点名文本)，
+# 不能抛异常（dot 6541300246：结构问题不能靠 AttributeError 崩溃带过，
+# 必须落到点名的 FAIL fixtures.manifest）。
+MANIFEST_NEGATIVE = [
+    ("top_array", "[]",
+     "顶层必须是对象", "manifest 是合法 JSON 数组：.get() 会崩，须点名失败"),
+    ("fixtures_not_object", '{"fixtures": ["x"]}',
+     "fixtures 必须是对象", "fixtures 是数组：.items() 会崩，须点名失败"),
+    ("fixtures_missing", '{}',
+     "fixtures 必须是对象", "fixtures 键缺失：不能静默按空清单过，须点名失败"),
+    ("record_not_object", '{"fixtures": {"a.json": "oops"}}',
+     "记录必须是对象", "单条记录是字符串：want.get() 会崩，须点名失败"),
+    ("record_field_type", '{"fixtures": {"a.json": {"bytes": "12", "sha256": 1}}}',
+     "记录字段类型错误", "bytes 不是整数／sha256 不是字符串，须点名失败"),
+    ("manifest_missing", None,
+     "manifest 文件缺失", "manifest 文件不存在，须点名失败"),
+    ("manifest_bad_json", "not json{{{",
+     "manifest 解析失败", "manifest 不是合法 JSON，须点名失败"),
 ]
 
 
@@ -83,7 +110,26 @@ def main() -> int:
     else:
         failures.append(("fixtures.manifest", "-", "-", "夹具字节与锁定值不一致"))
         print(f"FAIL fixtures.manifest：{man_detail}")
-    total = len(CASES) + 1
+    # 防漂移自身的负例：结构问题必须点名失败，不能抛异常
+    for tag, text, want_phrase, why in MANIFEST_NEGATIVE:
+        with tempfile.TemporaryDirectory(prefix="manneg_") as td:
+            base = Path(td)
+            if text is not None:
+                (base / "fixtures.manifest.json").write_text(text, encoding="utf-8")
+            try:
+                ok, detail = check_manifest(base)
+            except Exception as e:  # noqa: BLE001 —— 抛异常即失败
+                failures.append((f"manifest 负例 {tag}", "-", "-", why))
+                print(f"FAIL manifest 负例 {tag}：抛异常 {type(e).__name__}（{why}）；"
+                      f"应返回点名失败，不抛异常")
+                continue
+            if (not ok) and want_phrase in detail:
+                print(f"PASS manifest 负例 {tag}：{why} → {detail[:60]}")
+            else:
+                failures.append((f"manifest 负例 {tag}", "-", "-", why))
+                print(f"FAIL manifest 负例 {tag}：{why}；应返回 ok=False 且 detail 含"
+                      f"「{want_phrase}」，实际 ok={ok} detail={detail[:80]}")
+    total = len(CASES) + 1 + len(MANIFEST_NEGATIVE)
     if failures:
         print(f"\n{len(failures)} 个断言失败，见上。")
         return 1
@@ -91,28 +137,54 @@ def main() -> int:
     return 0
 
 
-def check_manifest():
+def check_manifest(base=None):
     """断言 experiments/crosscheck 下全部 claim_*.json 与
-    fixtures.manifest.json 的锁定值（字节数＋SHA256）一致。"""
-    man_path = HERE / "fixtures.manifest.json"
+    fixtures.manifest.json 的锁定值（字节数＋SHA256）一致。
+
+    base：清单与夹具所在目录，默认脚本同目录（断言 14）；
+    负例（断言 15–20）传入临时目录做结构破坏测试。
+
+    任何结构／类型／读取问题都返回 (False, 点名失败文本)，
+    绝不抛异常：失败行统一由 main() 打成
+    「FAIL fixtures.manifest：…」（dot PR #21 6541300246）。
+    """
+    base = HERE if base is None else Path(base)
+    man_path = base / "fixtures.manifest.json"
     if not man_path.exists():
         return False, "manifest 文件缺失（fixtures.manifest.json）"
     try:
         man = json.loads(man_path.read_text(encoding="utf-8"))
     except Exception as e:  # noqa: BLE001 —— 读不出 manifest 本身就是失败
         return False, f"manifest 解析失败：{e}"
-    locked = man.get("fixtures", {})
+    if not isinstance(man, dict):
+        return False, f"manifest 顶层必须是对象（得到 {type(man).__name__}）"
+    locked = man.get("fixtures")
+    if not isinstance(locked, dict):
+        return False, f"fixtures 必须是对象（得到 {type(locked).__name__}）"
+    for name, want in locked.items():
+        if not isinstance(want, dict):
+            return False, f"{name}：记录必须是对象（得到 {type(want).__name__}）"
+        b, s = want.get("bytes"), want.get("sha256")
+        if not isinstance(b, int) or not isinstance(s, str):
+            return False, f"{name}：记录字段类型错误（bytes 须为整数、sha256 须为字符串）"
     bad = []
     for name, want in sorted(locked.items()):
-        p = HERE / name
+        p = base / name
         if not p.exists():
             bad.append(f"{name}：文件缺失")
             continue
-        b = p.read_bytes()
-        if len(b) != want.get("bytes") or hashlib.sha256(b).hexdigest() != want.get("sha256"):
+        try:
+            data = p.read_bytes()
+        except OSError as e:
+            bad.append(f"{name}：文件读取失败：{e}")
+            continue
+        if len(data) != want["bytes"] or hashlib.sha256(data).hexdigest() != want["sha256"]:
             bad.append(f"{name}：字节/SHA256 与锁定值不一致")
-    extra = sorted(p.name for p in HERE.glob("claim_*.json")
-                   if p.name not in locked)
+    try:
+        extra = sorted(p.name for p in base.glob("claim_*.json")
+                       if p.name not in locked)
+    except OSError as e:
+        return False, f"扫描夹具目录失败：{e}"
     if extra:
         bad.append("未被 manifest 锁定的新夹具：" + "、".join(extra))
     if bad:
