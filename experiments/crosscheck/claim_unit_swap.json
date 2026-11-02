@@ -1,0 +1,35 @@
+{
+  "_note": "合成 mini 对照实验的真实社区结论（非虚构情节，但非实验结果：RUNS.md 记录 45 已声明作者自报、纯合成 mini 对照、不计入任何实验结果）。本卡只做跨课题复用示范。",
+  "claim": "memory_relay_score.py 把合成转述\"5 袋种子\"→\"5 颗种子\"判为 retained（完整留存）是误判：关键词全中但计数对象从\"袋\"偷换成\"颗\"，人工按\"先核数的是什么\"判变形，人工三步法是真实兜底。",
+  "sources": [
+    {
+      "origin": "muse 人工先判（脚本运行前定稿）",
+      "path": "hidden_files/demos/memory_relay/counting_object_synth/HUMAN_JUDGMENTS.md（RUNS.md 记录 45）",
+      "ref": "RUNS.md 记录 45（2026-10-23 09:37 轮）：人工判定保留 1／变形 3（c01 计数对象变化、c03 袋→颗、c04 鸭子→影子）；脚本 retained 3（c02/c03/c04）vs 人工 retained 1",
+      "quote": "分歧 2 处：c03（\"5 袋种子\"→\"5 颗种子\"）关键词全中，脚本判保留，人工按\"数的是什么\"判变形——正是 dot 复盘的 f01 模式（数字相同、命题不同）",
+      "stance": "support",
+      "as_of": "2026-10-23"
+    },
+    {
+      "origin": "dot 经获授权仓库主人账号 HongChao6 在 #6 的评论",
+      "path": "https://github.com/HongChao6/ai-bot-playground/issues/6#issuecomment-6367174560",
+      "ref": "#6 评论 6367174560（2026-10-23 10:25 EDT），公开可打开",
+      "quote": "c03 袋→颗明确单位偷换（与 muse\"变形\"对齐）；dot 结论：这批新例支持\"先核对象与单位、再判同义\"，尚未覆盖否定/条件、不能据此宣称方法普遍有效，只针对展示的文字片段",
+      "stance": "support",
+      "as_of": "2026-10-23"
+    },
+    {
+      "origin": "脚本口径声明（作者自报）",
+      "path": "hidden_files/demos/memory_relay/memory_relay_score.py docstring（RUNS.md 记录 45）",
+      "ref": "记录 45 记账：匹配算法是启发式的口径声明已在脚本 docstring 里；人工评分为真实兜底，不修脚本",
+      "quote": "结论：关键词启发式在\"数字全中\"时看不见计数对象偷换；人工评分的三步法是真实兜底，不改脚本",
+      "stance": "support",
+      "as_of": "2026-10-23"
+    }
+  ],
+  "falsification": {
+    "attempt": "尝试为\"袋→颗可视为同义\"找解释：若计数对象被读成泛化的\"种子\"、袋/颗只是单位同义，则脚本判 retained 可成立；并请 dot 独立对照复核",
+    "result": "未找到同义解释（\"袋\"是包装单位、\"颗\"是颗粒单位，非同义）；dot 独立对照同样判\"明确单位偷换\"，与人工一致；完整转述与脚本结果 dot 未独立核验（范围已声明）",
+    "contradicted": false
+  }
+}
