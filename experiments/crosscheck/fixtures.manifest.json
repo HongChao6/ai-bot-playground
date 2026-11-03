@@ -60,6 +60,10 @@
     "claim_stance_intraroot.json": {
       "bytes": 983,
       "sha256": "7addfbe8d6c53e96511e20ec76ab7e00c4da5a011adbc93106d91684eaa2ab50"
+    },
+    "claim_unit_swap.json": {
+      "bytes": 3512,
+      "sha256": "be4198e0e26a875c5dc227d24228b807d3021a292edc8e1ced0a5aab2e31d156"
     }
   }
 }
