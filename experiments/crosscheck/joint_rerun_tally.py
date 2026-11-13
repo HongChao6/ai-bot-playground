@@ -22,6 +22,7 @@
 - 未计入汇总的报告单独列入"待补"清单并注明原因：
   缺独立声明／非独立运行／缺看过／没看过声明；补上后重新汇总即计入。
   待补不挡其他已计入报告的一致性判定。
+  待补行同时印出该条的 exit 码与判定（待补行内部也可能分歧，只印名字会藏起来，见 RUN 529）。
 - 输入结构非法（顶层非数组、记录非对象、字段类型不对、seen 取值非法）
   一律 exit=2 并点名字段，拒绝运行，不抛 Traceback。
 - 本工具只汇总报告内容，不证明材料中结论为真（与 dot 口径一致）。
@@ -229,6 +230,38 @@ def selftest():
         assert "缺独立声明" in pending[0][1], "待补原因应点名缺独立声明"
     check("missing_independent", t_missing_independent)
 
+    # 待补行印出该条的 exit 码与判定（RUN 529「补」：待补两条自己还分歧，
+    # 只印名字会把丙 exit 2 与丁 exit 0 的分歧藏起来）。
+    def t_pending_prints_exit_verdict():
+        import io as _io
+        import tempfile as _tf
+        from contextlib import redirect_stdout as _ro
+        reports = [
+            _base_report(member="甲", seen_author_records="没看过"),
+            _base_report(member="乙", seen_author_records="看过"),
+            {"member": "丙", "fixture": "f1.json", "fixture_rev": 2,
+             "commit": EXPECTED_COMMIT, "exit_code": 2,
+             "verdict": "未核实", "seen_author_records": "没看过"},
+            {"member": "丁", "fixture": "f1.json", "fixture_rev": 2,
+             "commit": EXPECTED_COMMIT, "exit_code": 0,
+             "verdict": "材料检查通过（未被推翻）",
+             "seen_author_records": "没看过"},
+        ]
+        with _tf.NamedTemporaryFile("w", suffix=".json", delete=False,
+                                    encoding="utf-8") as f:
+            json.dump(reports, f, ensure_ascii=False)
+            path = f.name
+        buf = _io.StringIO()
+        with _ro(buf):
+            code = main([path])
+        out = buf.getvalue()
+        assert code == 0, f"双待补四人单应 exit=0，得 {code}"
+        assert "待补：丙/f1.json" in out and "exit=2" in out \
+            and "未核实" in out, "待补行应印丙的 exit 码与判定"
+        assert "待补：丁/f1.json" in out and "exit=0" in out \
+            and "材料检查通过（未被推翻）" in out, "待补行应印丁的 exit 码与判定"
+    check("pending_prints_exit_verdict", t_pending_prints_exit_verdict)
+
     # independent 为 false：非独立运行，不计入
     def t_not_independent():
         rows, ok, warnings, pending = tally([
@@ -315,7 +348,8 @@ def main(argv):
     print(f"成员报告数：{len(reports)}，计入汇总：{len(reports) - len(pending)}，"
           f"待补（缺声明／非独立运行）：{len(pending)}，fixture 数：{len(rows)}")
     for p, reason in pending:
-        print(f"待补：{p.get('member')}/{p.get('fixture')}：{reason}，未计入汇总")
+        print(f"待补：{p.get('member')}/{p.get('fixture')}：{reason}；"
+              f"exit={p.get('exit_code')}，判定={normalize_verdict(str(p.get('verdict')))}，未计入汇总")
     for w in warnings:
         print(f"警告：{w}")
     counted = len(reports) - len(pending)
