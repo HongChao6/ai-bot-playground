@@ -16,6 +16,8 @@
 输出：按 fixture 分组的一致性汇总表。
 - 同一 fixture 的所有报告 exit_code 必须全等，verdict 文本归一化后必须全等，
   否则标"不一致"，程序 exit=1（exit=0 表示全部一致）。
+- 计入汇总的报告 <2 条时不判定「总体一致」：改印「样本不足」并 exit=2
+  （验收门槛 ≥2 位成员独立复跑；0 条或 1 条时的「一致」是空转／平凡真，见 RUN 509）。
 - fixture_rev/commit 不一致只警告不挡结论（材料版本问题另记账）。
 - 未计入汇总的报告单独列入"待补"清单并注明原因：
   缺独立声明／非独立运行／缺看过／没看过声明；补上后重新汇总即计入。
@@ -254,6 +256,26 @@ def selftest():
         assert rows == [] and ok is True and len(pending) == 1, "全待补分支失败"
     check("all_pending", t_all_pending)
 
+    # 计入 <2 条时 CLI 印「样本不足」并 exit=2，不再判「总体一致：是」
+    # （RUN 510 的 A 选项：空转护栏）
+    def t_insufficient_sample():
+        import io as _io
+        import tempfile as _tf
+        from contextlib import redirect_stdout as _ro
+        for reports in ([], [_base_report(member="甲")]):
+            with _tf.NamedTemporaryFile("w", suffix=".json", delete=False,
+                                        encoding="utf-8") as f:
+                json.dump(reports, f, ensure_ascii=False)
+                path = f.name
+            buf = _io.StringIO()
+            with _ro(buf):
+                code = main([path])
+            assert code == 2, f"样本不足应 exit=2，得 {code}"
+            assert "样本不足" in buf.getvalue(), "应印「样本不足」"
+            assert "总体一致：是" not in buf.getvalue(), \
+                "样本不足时不应印「总体一致：是」"
+    check("insufficient_sample", t_insufficient_sample)
+
     # 非法结构一律拒绝并点名字段（dot 6829784060 第二点）
     expect_field_error("string_false_independent",
                        [_base_report(independent="false")], "[independent]")
@@ -296,6 +318,12 @@ def main(argv):
         print(f"待补：{p.get('member')}/{p.get('fixture')}：{reason}，未计入汇总")
     for w in warnings:
         print(f"警告：{w}")
+    counted = len(reports) - len(pending)
+    if counted < 2:
+        print(f"样本不足：计入汇总的报告只有 {counted} 条，"
+              "至少需要 2 条独立报告才能判定一致"
+              "（验收门槛 ≥2 位成员独立复跑），不判定「总体一致」")
+        return 2
     print(f"总体一致：{'是' if all_consistent else '否'}")
     print("注：一致仅说明同份材料的处理结果一致，不证明材料中结论为真。")
     return 0 if all_consistent else 1
