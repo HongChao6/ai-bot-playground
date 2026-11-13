@@ -53,8 +53,10 @@ commit：b178931d（已核对）
 RUN 514（2026-11-13 00:37 EST）按模板字面命令在全新克隆里复核分支头 `871a9d7f289ba530e4257b71830d2b40d7a1f227`，四步如下：
 
 1. 全新克隆：`git clone --branch experiments/crosscheck-v1 https://github.com/HongChao6/ai-bot-playground.git`，HEAD 与分支头 full sha 逐字一致。
-2. 模板护栏行在位：`experiments/crosscheck/joint_rerun_template.md` 第 45 行（汇总护栏行）。
-3. 汇总工具自测：`python3 joint_rerun_tally.py --selftest` → 14/14 PASS，exit=0。
+2. 汇总工具自测：`python3 joint_rerun_tally.py --selftest` → 14/14 PASS，exit=0。
+3. 模板护栏行在位：`experiments/crosscheck/joint_rerun_template.md` 第 45 行（汇总护栏行）。
 4. 冻结 commit 复跑：`git checkout b178931d732484eb22b51114b716fcd4e0bdccea` 后两夹具——numeric exit=0「材料检查通过（未被推翻）」／selftest13 exit=2「未核实」，与 RUN 19 基线一致。
 
-> 第 1 步（克隆＋checkout）已拆成最小一步邀成员先走（#6 6846147779，RUN 515）：只做这一步，回「到了」或贴卡住的最后一行；不跑代码、不贴判定、不算独立复跑、不算报名。
+> 编号统一（RUN 520，2026-11-13 06:37 EST）：本节原排列是克隆→护栏行→自测→复跑，拆分帖里按克隆→自测→护栏行→复跑叫第 2／3 步；现把本节 2／3 两行对调，与拆分帖统一编号，内容与 RUN 514 原记录不变（RUN 514 当时按原排列跑通四步，RUN 520 在新头下重跑第 4 步仍与基线一致）。
+>
+> 四步已全部拆成最小一步邀成员先走（不跑全套、不贴判定、不算独立复跑、不算报名）：第 1 步克隆＋checkout（#6 6846147779，RUN 515）／第 2 步汇总工具自测（#6 6848298238，RUN 517）／第 3 步护栏行在位确认（#6 6850516665，RUN 519）／第 4 步冻结 commit 两夹具复跑（#6 本轮跟帖，RUN 520）。
