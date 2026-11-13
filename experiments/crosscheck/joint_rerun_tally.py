@@ -32,6 +32,7 @@
   python3 joint_rerun_tally.py --selftest   # 合成样本验证工具自身，数据为虚构
 """
 import json
+import os
 import sys
 
 EXPECTED_COMMIT = "b178931d"
@@ -232,10 +233,34 @@ def selftest():
 
     # 待补行印出该条的 exit 码与判定（RUN 529「补」：待补两条自己还分歧，
     # 只印名字会把丙 exit 2 与丁 exit 0 的分歧藏起来）。
-    def t_pending_prints_exit_verdict():
+    # 行绑定（dot 6865635084）：断言必须落在同一待补行内查字段，
+    # 整段分别搜成员名/exit/判定抓不住错配（见 t_pending_row_binding）。
+    def _pending_line(out, member):
+        """取某成员的那一行待补行；找不到即断言失败。"""
+        for line in out.splitlines():
+            if line.startswith(f"待补：{member}/"):
+                return line
+        raise AssertionError(f"输出中找不到 {member} 的待补行")
+
+    def _run_main_on_reports(reports):
+        """把 reports 写临时文件跑 main，finally 清理（dot 6865635084：
+        不再留 delete=False 的临时文件）。返回 (exit_code, stdout)。"""
         import io as _io
         import tempfile as _tf
         from contextlib import redirect_stdout as _ro
+        with _tf.NamedTemporaryFile("w", suffix=".json", delete=False,
+                                    encoding="utf-8") as f:
+            json.dump(reports, f, ensure_ascii=False)
+            path = f.name
+        try:
+            buf = _io.StringIO()
+            with _ro(buf):
+                code = main([path])
+            return code, buf.getvalue()
+        finally:
+            os.unlink(path)
+
+    def t_pending_prints_exit_verdict():
         reports = [
             _base_report(member="甲", seen_author_records="没看过"),
             _base_report(member="乙", seen_author_records="看过"),
@@ -247,20 +272,43 @@ def selftest():
              "verdict": "材料检查通过（未被推翻）",
              "seen_author_records": "没看过"},
         ]
-        with _tf.NamedTemporaryFile("w", suffix=".json", delete=False,
-                                    encoding="utf-8") as f:
-            json.dump(reports, f, ensure_ascii=False)
-            path = f.name
-        buf = _io.StringIO()
-        with _ro(buf):
-            code = main([path])
-        out = buf.getvalue()
+        code, out = _run_main_on_reports(reports)
         assert code == 0, f"双待补四人单应 exit=0，得 {code}"
-        assert "待补：丙/f1.json" in out and "exit=2" in out \
-            and "未核实" in out, "待补行应印丙的 exit 码与判定"
-        assert "待补：丁/f1.json" in out and "exit=0" in out \
-            and "材料检查通过（未被推翻）" in out, "待补行应印丁的 exit 码与判定"
+        line_b = _pending_line(out, "丙")
+        assert "exit=2" in line_b and "未核实" in line_b, \
+            f"丙的待补行应印 exit=2 与「未核实」，得 {line_b!r}"
+        line_d = _pending_line(out, "丁")
+        assert "exit=0" in line_d and "材料检查通过（未被推翻）" in line_d, \
+            f"丁的待补行应印 exit=0 与「材料检查通过」，得 {line_d!r}"
     check("pending_prints_exit_verdict", t_pending_prints_exit_verdict)
+
+    # 行绑定回归（dot 6865635084 的两例）：丙/丁的 exit 与判定互换后，
+    # 旧式整段断言仍会通过（已用真跑复现），新式按行断言必须抓住错配。
+    def t_pending_row_binding_catches_swap():
+        reports = [
+            _base_report(member="甲", seen_author_records="没看过"),
+            _base_report(member="乙", seen_author_records="看过"),
+            {"member": "丙", "fixture": "f1.json", "fixture_rev": 2,
+             "commit": EXPECTED_COMMIT, "exit_code": 0,
+             "verdict": "材料检查通过（未被推翻）",
+             "seen_author_records": "没看过"},
+            {"member": "丁", "fixture": "f1.json", "fixture_rev": 2,
+             "commit": EXPECTED_COMMIT, "exit_code": 2,
+             "verdict": "未核实", "seen_author_records": "没看过"},
+        ]
+        code, out = _run_main_on_reports(reports)
+        assert code == 0, f"错配双待补四人单应 exit=0，得 {code}"
+        # 旧式整段断言对错配输出仍通过——这正是缺口，留作对照。
+        assert "待补：丙/f1.json" in out and "exit=2" in out \
+            and "未核实" in out, "旧式断言应对错配输出仍通过（缺口对照）"
+        # 新式按行断言必须抓住错配：丙行不是 exit=2，丁行不是 exit=0。
+        line_b = _pending_line(out, "丙")
+        assert "exit=2" not in line_b, \
+            f"按行断言应抓住丙行错配 exit，得 {line_b!r}"
+        line_d = _pending_line(out, "丁")
+        assert "exit=0" not in line_d, \
+            f"按行断言应抓住丁行错配 exit，得 {line_d!r}"
+    check("pending_row_binding_catches_swap", t_pending_row_binding_catches_swap)
 
     # independent 为 false：非独立运行，不计入
     def t_not_independent():
@@ -292,20 +340,11 @@ def selftest():
     # 计入 <2 条时 CLI 印「样本不足」并 exit=2，不再判「总体一致：是」
     # （RUN 510 的 A 选项：空转护栏）
     def t_insufficient_sample():
-        import io as _io
-        import tempfile as _tf
-        from contextlib import redirect_stdout as _ro
         for reports in ([], [_base_report(member="甲")]):
-            with _tf.NamedTemporaryFile("w", suffix=".json", delete=False,
-                                        encoding="utf-8") as f:
-                json.dump(reports, f, ensure_ascii=False)
-                path = f.name
-            buf = _io.StringIO()
-            with _ro(buf):
-                code = main([path])
+            code, out = _run_main_on_reports(reports)
             assert code == 2, f"样本不足应 exit=2，得 {code}"
-            assert "样本不足" in buf.getvalue(), "应印「样本不足」"
-            assert "总体一致：是" not in buf.getvalue(), \
+            assert "样本不足" in out, "应印「样本不足」"
+            assert "总体一致：是" not in out, \
                 "样本不足时不应印「总体一致：是」"
     check("insufficient_sample", t_insufficient_sample)
 
