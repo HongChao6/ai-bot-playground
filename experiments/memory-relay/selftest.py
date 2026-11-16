@@ -7,6 +7,8 @@ confidence 缺失政策断言（缺失=允许，按"不明"处理）。
 v0.4（dot 6327630900）：路径全部改为相对 __file__（仓库根独立复跑可用），
 confidence 缺省语义补匹配已确认事实的样本——f01 缺 confidence 应落
 "置信降级"而非留存。
+v0.5（执行 #6 6914117154 的 A）：中文数字写法归一化——hop_cn_numeral_pack.json
+（f01 五跳／f02 二十四小时／f03 零点六）应与 hop1 基线一致留存 10/12。
 """
 import json
 import subprocess
@@ -46,6 +48,10 @@ CASES = [
     # 不是留存（dot 6327630900）
     ("hop_missing_conf_matched_pack.json", {"retained": 9, "deformed": 2, "lost": 1, "fabricated": 1,
                                             "severe_flips": 1, "retention_rate": 0.75, "audit_notes": 0}),
+    # 中文数字归一化（v0.5，执行 #6 6914117154 的 A）：五跳／二十四小时／零点六
+    # 应与 hop1 基线一致留存 10/12（v0.4 下为 7/12）
+    ("hop_cn_numeral_pack.json", {"retained": 10, "deformed": 1, "lost": 1, "fabricated": 1,
+                                  "severe_flips": 1, "retention_rate": 0.833, "audit_notes": 0}),
 ]
 
 fails = []
@@ -133,6 +139,14 @@ hop = json.loads(r.stdout)["hops"][0]
 if "f01" in hop["retained"]:
     fails.append("否定反例: '根本没有5跳' 不应被判为 f01 的留存")
 
+# 行为断言：非数字键否定已知局限实证（RUN 176）：f10 全部三关键词字面命中
+# （"上一跳／转述文本／不能回看"），但转述明示豁免规则——关键词启发式无法区分
+# "陈述禁止"与"豁免禁止"，脚本判留存，人工应判变形（RUN 45 同类分歧模式）
+r = run([F("seed_facts.json"), F("hop_negation_rule_pack.json")])
+hop = json.loads(r.stdout)["hops"][0]
+if "f10" not in hop["retained"]:
+    fails.append("非数字否定局限: '不能回看……可以不遵守' 下 f10 应（按脚本当前行为）计入留存——此为已知局限，不是正确判定")
+
 # 行为断言：confidence 缺失 = 允许，按"不明"处理（dot 6326331117）
 r = run([F("seed_facts.json"), F("hop_missing_conf_pack.json")])
 if r.returncode != 0:
@@ -154,6 +168,15 @@ else:
         fails.append("缺省语义: f01 应落入变形")
     elif "置信降级" not in "/".join(f01_def[0].get("kinds", [])):
         fails.append("缺省语义: f01 变形种类应标注 置信降级")
+
+# 行为断言：中文数字归一化（v0.5，执行 #6 6914117154 的 A）
+r = run([F("seed_facts.json"), F("hop_cn_numeral_pack.json")])
+hop = json.loads(r.stdout)["hops"][0]
+for fid in ("f01", "f02", "f03"):
+    if fid not in hop["retained"]:
+        fails.append(f"中文数字归一化: {fid}（五跳／二十四小时／零点六）应计入留存")
+if hop["stats"]["retention_rate"] != 0.833:
+    fails.append("中文数字归一化: 留存率应与 hop1 基线一致为 0.833")
 
 # 行为断言：类型先校验后查枚举（dot 6326331117）——一律 exit=1、点名字段、无 Traceback
 type_cases = [
