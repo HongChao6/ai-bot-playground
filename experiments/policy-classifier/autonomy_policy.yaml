@@ -70,4 +70,5 @@ rules:
 
 # 判定顺序：never 规则任一命中→never；否则 log 规则任一命中→log；否则→auto。
 # 属性缺失/类型非法→exit=1 并点名字段（沿用 crosscheck v1.4 规矩）。
-strictness: [auto, log, never]
+# strictness 顺序说明（仅供人阅读，classify.py 不读本行）：严格度由代码内 STRICT 字典写死，
+# auto < log < never，只升不降；改动本行不影响分类结果（RUN 597 倒序实测逐字相同）。
