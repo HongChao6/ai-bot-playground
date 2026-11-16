@@ -19,6 +19,8 @@
 - 计入汇总的报告 <2 条时不判定「总体一致」：改印「样本不足」并 exit=2
   （验收门槛 ≥2 位成员独立复跑；0 条或 1 条时的「一致」是空转／平凡真，见 RUN 509）。
 - fixture_rev/commit 不一致只警告不挡结论（材料版本问题另记账）。
+- fixture 分组键归一化：去首尾空白后分组（RUN 581，执行 #6 6903332482 的 A）；
+  行里印归一化后的夹具名，首尾空白不再把同一夹具劈成两行藏分歧。
 - 未计入汇总的报告单独列入"待补"清单并注明原因：
   缺独立声明／非独立运行／缺看过／没看过声明；补上后重新汇总即计入。
   待补不挡其他已计入报告的一致性判定。
@@ -49,6 +51,13 @@ def normalize_verdict(v: str) -> str:
     v = (v or "").strip()
     v = v.replace("(", "（").replace(")", "）")
     return v
+
+
+def normalize_fixture(f: str) -> str:
+    """fixture 分组键归一化：去首尾空白。
+    RUN 580：尾部一个半角空格就把同一夹具劈成两行，两行各自"一致"，
+    分歧被藏起来，「总体一致：是」成了空转。"""
+    return (f or "").strip()
 
 
 def _need_str(record, field):
@@ -107,7 +116,7 @@ def tally(reports):
 
     by_fixture = {}
     for r in counted:
-        by_fixture.setdefault(r.get("fixture"), []).append(r)
+        by_fixture.setdefault(normalize_fixture(r.get("fixture")), []).append(r)
 
     rows = []
     warnings = []
@@ -215,6 +224,22 @@ def selftest():
         ])
         assert ok is False
     check("verdict_mismatch", t_verdict_mismatch)
+
+    # fixture 分组键归一化（RUN 581，执行 #6 6903332482 的 A）：
+    # "f1.json" 与 "f1.json "（尾部一个空格）应归到同一行，n=2，
+    # exit 码分歧不再被两行各自"一致"藏起来。
+    def t_fixture_key_normalized():
+        rows, ok, warnings, pending = tally([
+            _base_report(member="甲"),
+            _base_report(member="乙", fixture="f1.json ",
+                         exit_code=2, verdict="未核实"),
+        ])
+        assert len(rows) == 1 and rows[0]["n"] == 2, \
+            f"首尾空白不同的同一夹具应归一行，得 {rows!r}"
+        assert rows[0]["fixture"] == "f1.json", "行里应印归一化后的夹具名"
+        assert rows[0]["exit_codes"] == [0, 2] and ok is False, \
+            "归并后 exit 码分歧应判总体不一致"
+    check("fixture_key_normalized", t_fixture_key_normalized)
 
     # 缺独立声明的报告不计入汇总、单独列待补：计入的两条一致，
     # 待补那条 exit 码不同也不影响一致性判定。
