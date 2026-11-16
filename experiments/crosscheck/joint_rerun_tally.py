@@ -25,6 +25,8 @@
   缺独立声明／非独立运行／缺看过／没看过声明；补上后重新汇总即计入。
   待补不挡其他已计入报告的一致性判定。
   待补行同时印出该条的 exit 码与判定（待补行内部也可能分歧，只印名字会藏起来，见 RUN 529）。
+  待补行印的 fixture 名也用归一化后的值（RUN 582，执行 #6 6904190245 的 A），
+  与汇总行一致；只归一化显示，不改报告原文存的值。
 - 输入结构非法（顶层非数组、记录非对象、字段类型不对、seen 取值非法）
   一律 exit=2 并点名字段，拒绝运行，不抛 Traceback。
 - 本工具只汇总报告内容，不证明材料中结论为真（与 dot 口径一致）。
@@ -307,6 +309,26 @@ def selftest():
             f"丁的待补行应印 exit=0 与「材料检查通过」，得 {line_d!r}"
     check("pending_prints_exit_verdict", t_pending_prints_exit_verdict)
 
+    # 待补行印归一化后的 fixture 名（RUN 582，执行 #6 6904190245 的 A）：
+    # "f1.json "（尾部一个空格）的待补行应印 "f1.json"，与汇总行一致，
+    # 表里不再看不出是同一夹具。
+    def t_pending_fixture_normalized():
+        reports = [
+            _base_report(member="甲", seen_author_records="没看过"),
+            _base_report(member="乙", seen_author_records="看过"),
+            {"member": "丙", "fixture": "f1.json ", "fixture_rev": 2,
+             "commit": EXPECTED_COMMIT, "exit_code": 2,
+             "verdict": "未核实", "seen_author_records": "没看过"},
+        ]
+        code, out = _run_main_on_reports(reports)
+        assert code == 0, f"单待补三人单应 exit=0，得 {code}"
+        line_b = _pending_line(out, "丙")
+        assert line_b.startswith("待补：丙/f1.json："), \
+            f"丙的待补行应印归一化后的 fixture 名，得 {line_b!r}"
+        assert "f1.json " not in line_b, \
+            f"待补行不应印带尾部空格的原文名，得 {line_b!r}"
+    check("pending_fixture_normalized", t_pending_fixture_normalized)
+
     # 行绑定回归（dot 6865635084 的两例）：丙/丁的 exit 与判定互换后，
     # 旧式整段断言仍会通过（已用真跑复现），新式按行断言必须抓住错配。
     def t_pending_row_binding_catches_swap():
@@ -412,7 +434,7 @@ def main(argv):
     print(f"成员报告数：{len(reports)}，计入汇总：{len(reports) - len(pending)}，"
           f"待补（缺声明／非独立运行）：{len(pending)}，fixture 数：{len(rows)}")
     for p, reason in pending:
-        print(f"待补：{p.get('member')}/{p.get('fixture')}：{reason}；"
+        print(f"待补：{p.get('member')}/{normalize_fixture(p.get('fixture'))}：{reason}；"
               f"exit={p.get('exit_code')}，判定={normalize_verdict(str(p.get('verdict')))}，未计入汇总")
     for w in warnings:
         print(f"警告：{w}")
