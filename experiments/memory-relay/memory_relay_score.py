@@ -26,6 +26,11 @@
     不是/无法/并未/不能）。非数字关键词的否定仍是启发式已知局限，见口径声明。
     非数字关键词仍用子串匹配（中文无词边界，数字边界只保证数值不串位）。覆盖 <1 且缺失的关键词是数字时，
     变形种类加记「数值变化/缺失」。
+  - 中文数字写法归一化（v0.5，执行 #6 6914117154 的 A）：匹配前把中文数字写法
+    （五／二十四／零点六／一百二十三 等）转成阿拉伯数字，种子关键词与 hop 文本两边
+    同时归一化——「五跳」与「5 跳」按同一写法比对。只做写法归一化，不做语义判断；
+    已知局限：成语／惯用语里的数字字也会被转写（如「五花八门」→「5花8门」、
+    「千万别」→「10000000别」），该局限与阿拉伯数字出现在成语里同类，不另设白名单。
   - 未确认->已确认 的状态翻转 = 严重变形（dot 验收要求，单独计数）。
   - 已确认->未确认/不明 = 变形（置信降级）。
   - 无对应种子事实的 hop 条目 = 臆造项，单独计数，不计入留存率分子。
@@ -69,6 +74,65 @@ class InputError(Exception):
 
 def norm(s):
     return PUNCT.sub("", s or "")
+
+
+CN_DIGIT = {"零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "两": 2}
+CN_UNIT = {"十": 10, "百": 100, "千": 1000}
+CN_BIG = {"万": 10000, "亿": 100000000}
+CN_NUMERAL_RUN = re.compile(r"[零一二三四五六七八九十百千万两]+(?:点[零一二三四五六七八九]+)?")
+
+
+def _cn_int(s):
+    """中文整数写法 -> int；非法组合返回 None（调用方原样保留）。"""
+    total = 0
+    section = 0
+    num = 0
+    seen_digit = False
+    for ch in s:
+        if ch in CN_DIGIT:
+            num = CN_DIGIT[ch]
+            seen_digit = True
+        elif ch in CN_UNIT:
+            if not seen_digit:
+                num = 1
+            section += num * CN_UNIT[ch]
+            num = 0
+            seen_digit = False
+        elif ch in CN_BIG:
+            if section == 0 and num == 0 and not seen_digit:
+                section = 1
+            total += (section + num) * CN_BIG[ch]
+            section = 0
+            num = 0
+            seen_digit = False
+        else:
+            return None
+    return total + section + num
+
+
+def _cn_number(s):
+    """中文数字写法（含小数点）-> 阿拉伯数字字符串；无法解析返回 None。"""
+    if "点" in s:
+        ip, fp = s.split("点", 1)
+        if not ip or not fp:
+            return None
+        iv = _cn_int(ip)
+        if iv is None:
+            return None
+        digits = "".join(str(CN_DIGIT[c]) for c in fp)
+        if not digits:
+            return None
+        return "%d.%s" % (iv, digits)
+    v = _cn_int(s)
+    return None if v is None else str(v)
+
+
+def normalize_cn_numerals(text):
+    """把文本里的中文数字写法归一化为阿拉伯数字（v0.5）。"""
+    def repl(m):
+        v = _cn_number(m.group(0))
+        return v if v is not None else m.group(0)
+    return CN_NUMERAL_RUN.sub(repl, text)
 
 
 def part_matches(part, text):
@@ -171,8 +235,8 @@ def validate_hop(path, hop_no, pack):
 
 def coverage_detail(seed_fact, hop_text):
     """返回 (覆盖率, 缺失的数字关键词列表)。关键词支持 | 同义备选；数字纯键用边界匹配。"""
-    kws = [norm(k) for k in seed_fact.get("keywords", [])]
-    t = norm(hop_text)
+    kws = [normalize_cn_numerals(norm(k)) for k in seed_fact.get("keywords", [])]
+    t = normalize_cn_numerals(norm(hop_text))
     if not kws:
         return 0.0, []
     missed_numeric = []
