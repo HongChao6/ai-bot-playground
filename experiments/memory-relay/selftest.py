@@ -9,6 +9,11 @@ confidence 缺省语义补匹配已确认事实的样本——f01 缺 confidence
 "置信降级"而非留存。
 v0.5（执行 #6 6914117154 的 A）：中文数字写法归一化——hop_cn_numeral_pack.json
 （f01 五跳／f02 二十四小时／f03 零点六）应与 hop1 基线一致留存 10/12。
+v0.5.1（dot 6937317802 静态推演＋muse 真跑证实）：逐位写法——纯数字字连续出现
+按逐位拼接，「二零二六」= 2026（旧逻辑逐字覆盖 num 会算成 6）；hop_cn_year_pack.json
+（f07 写「二零二六年十月二十二日」）仍为变形 0.67：逐位数字本身已修好，但完整日期
+关键词 2026-10-22 含年/月/日分隔符、无法整串匹配——该分隔符缺口与中文数字无关，
+阿拉伯写法「2026年10月22日」同样 0.67（对照实证），记为已知局限，不修。
 """
 import json
 import subprocess
@@ -52,6 +57,11 @@ CASES = [
     # 应与 hop1 基线一致留存 10/12（v0.4 下为 7/12）
     ("hop_cn_numeral_pack.json", {"retained": 10, "deformed": 1, "lost": 1, "fabricated": 1,
                                   "severe_flips": 1, "retention_rate": 0.833, "audit_notes": 0}),
+    # 逐位年份写法（v0.5.1，dot 6937317802）：f07 写「二零二六年十月二十二日」，
+    # 数字本身已逐位转成 2026，但完整日期关键词因年/月/日分隔符无法整串匹配，
+    # 仍落变形 0.67、留存 9/12——此为已知局限的当前行为，不是修复目标
+    ("hop_cn_year_pack.json", {"retained": 9, "deformed": 2, "lost": 1, "fabricated": 1,
+                               "severe_flips": 1, "retention_rate": 0.75, "audit_notes": 0}),
 ]
 
 fails = []
@@ -197,6 +207,27 @@ for name, field in type_cases:
         fails.append(f"类型校验 {name}: stderr 应点名 {field}")
     if "Traceback" in (r.stdout + r.stderr):
         fails.append(f"类型校验 {name}: 输出不应含 Traceback")
+
+# 行为断言：逐位写法（v0.5.1，dot 6937317802）——单元级：纯数字字连续出现
+# 按逐位拼接；位值写法不受影响
+sys.path.insert(0, str(BASE))
+import memory_relay_score as mrs
+if mrs._cn_int("二零二六") != 2026:
+    fails.append("逐位写法: _cn_int('二零二六') 应为 2026")
+if mrs.normalize_cn_numerals("二零二六年十月二十二日") != "2026年10月22日":
+    fails.append("逐位写法: normalize('二零二六年十月二十二日') 应为 '2026年10月22日'")
+for _w, _want in (("二十四", 24), ("一百二十三", 123), ("一万二千三百四十五", 12345), ("五", 5)):
+    if mrs._cn_int(_w) != _want:
+        fails.append(f"逐位写法: _cn_int('{_w}') 应为 {_want}（位值写法回归）")
+if not mrs.part_matches(mrs.normalize_cn_numerals(mrs.norm("2026")),
+                        mrs.normalize_cn_numerals(mrs.norm("装置打样在二零二六年。"))):
+    fails.append("逐位写法: 关键词 2026 应对「二零二六」命中")
+# 端到端：完整日期仍变形（分隔符缺口，已知局限）；年份数字本身不再是原因
+r = run([F("seed_facts.json"), F("hop_cn_year_pack.json")])
+hop = json.loads(r.stdout)["hops"][0]
+f07_def = [d for d in hop["deformed"] if d["id"] == "f07"]
+if not f07_def or f07_def[0]["coverage"] != 0.67:
+    fails.append("逐位写法: f07（二零二六年十月二十二日）应落变形、覆盖 0.67（分隔符缺口）")
 
 if fails:
     print("FAIL:")
