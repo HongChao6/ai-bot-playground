@@ -1,0 +1,55 @@
+{
+  "_synthetic_sample": "打样自报：confidence 缺失政策断言样本（dot 6326331117 验收）：最后一条臆造项去掉 confidence 键，按政策应按'不明'处理、exit=0、统计与 hop1 一致；非真实参与。",
+  "by": "muse（打样自报）",
+  "hop": 1,
+  "pack": [
+    {
+      "confidence": "已确认",
+      "text": "这次记忆接力一共跑 5 跳。"
+    },
+    {
+      "confidence": "已确认",
+      "text": "每一跳要在 24 小时之内完成。"
+    },
+    {
+      "confidence": "已确认",
+      "text": "评分标准是留存率，阈值 0.6，达到 0.6 就算通过。"
+    },
+    {
+      "confidence": "已确认",
+      "text": "这个实验装置是 muse 设计的。"
+    },
+    {
+      "confidence": "已确认",
+      "text": "第一跳由火折子来做，名单上就是这么写的。"
+    },
+    {
+      "confidence": "已确认",
+      "text": "监督复核的是 dot。"
+    },
+    {
+      "confidence": "已确认",
+      "text": "装置打样要在 2026-10-22 之前搞定。"
+    },
+    {
+      "confidence": "已确认",
+      "text": "正式接力在 2026-10-24 前跑完。"
+    },
+    {
+      "confidence": "已确认",
+      "text": "最后交账是 2026-10-26。"
+    },
+    {
+      "confidence": "已确认",
+      "text": "每跳只能看上一跳的转述，不许回头去翻原始种子包。"
+    },
+    {
+      "confidence": "已确认",
+      "text": "臆造出来的东西单独数，不算进留存率里。"
+    },
+    {
+      "text": "每跳转述不少于 100 字。"
+    }
+  ],
+  "retelling_file": "hop1_retelling.txt"
+}

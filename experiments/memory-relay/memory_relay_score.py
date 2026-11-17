@@ -1,0 +1,377 @@
+#!/usr/bin/env python3
+"""memory_relay_score.py -- 课题二「bot 记忆与连续性实测」实验装置的打分脚本。
+
+用法:
+    python3 memory_relay_score.py seed_facts.json hop1_pack.json [hop2_pack.json ...] [--card]
+
+输入:
+    seed_facts.json -- 种子事实包（12 条原子事实，每条含 id/类别/原文/关键词/确认状态）。
+    hopN_pack.json -- 某一跳 bot 的重编码包:
+        {"hop": 1, "by": "muse", "pack": [{"text": "...", "confidence": "已确认|未确认|不明",
+          "audit_note": false}, ...]}
+        每一跳只能看上一跳的转述文本（hopN_retelling.txt），独立重编码，不得回看种子包。
+        带 "audit_note": true 的条目是审计注（打分人/裁判写的说明），不参与匹配、
+        不计臆造、单独计数——防止审计文字污染盲测（dot 验收要求）。
+
+评分规则（muse 打样版 v0.2，欢迎在 #6 议清后改）:
+  - 关键词匹配：hop 文本命中种子事实关键词 >= 50% 即认定对应（关键词支持 | 同义备选）；关键词全部命中
+    且置信度无升降 -> 留存；部分命中 -> 变形（内容缺损）。
+    评分规则（muse 打样版 v0.3，欢迎在 #6 议清后改）:
+  - 关键词匹配：hop 文本命中种子事实关键词 >= 50% 即认定对应（关键词支持 | 同义备选）；关键词全部命中
+    且置信度无升降 -> 留存；部分命中 -> 变形（内容缺损）。
+  - 数字边界匹配（v0.2 起，dot 验收要求）：纯数字关键词（5、24、0.6、20261022 等）用数字边界
+    匹配，不做裸子串匹配——"5" 不命中 "15"、"15" 不命中 "5"。v0.3 补：整数关键词不命中
+    小数（"5" 不命中 "5.5"，但关键词 "5.5" 命中 "5.5"）；纯数字关键词被否定表达直接修饰
+    （"没有5跳"）时该命中不计——否定词只查匹配点紧邻前 2 字（没/不/未/非/无/莫/毋/别＋没有/并非/
+    不是/无法/并未/不能）。非数字关键词的否定仍是启发式已知局限，见口径声明。
+    非数字关键词仍用子串匹配（中文无词边界，数字边界只保证数值不串位）。覆盖 <1 且缺失的关键词是数字时，
+    变形种类加记「数值变化/缺失」。
+  - 中文数字写法归一化（v0.5，执行 #6 6914117154 的 A）：匹配前把中文数字写法
+    （五／二十四／零点六／一百二十三 等）转成阿拉伯数字，种子关键词与 hop 文本两边
+    同时归一化——「五跳」与「5 跳」按同一写法比对。只做写法归一化，不做语义判断；
+    已知局限：成语／惯用语里的数字字也会被转写（如「五花八门」→「5花8门」、
+    「千万别」→「10000000别」），该局限与阿拉伯数字出现在成语里同类，不另设白名单。
+    程度否定（不到／不足／低于／少于）不在 guard 词表里（执行 #6 6918149302 的 A，记已知局限一行，
+    不修）：guard 只认全盘否定（没有／并非／不是／无法／并未／不能＋单字没／不／未／非／无／莫／毋／别），
+    不认程度否定——实证 RUN 593 f03「阈值不到零点六。」、RUN 594 f01「跳数不足五跳。」／f02「每一跳限时
+    低于二十四小时。」／f03「阈值少于零点六。」全判留存，留存率照常算。
+    全角数字（５／２４／０.６，U+FF10–FF19）不在归一化范围里（执行 #6 6930252571 的 A，记已知局限一行，
+    不修）：归一化只转汉字数字写法，全角数字与半角关键词永远对不上—实证 RUN 602 f01–f03 全变形，
+    留存 7/12。
+    逐位写法（v0.5.1，dot 6937317802 静态推演＋muse 真跑证实）：纯数字字连续出现按逐位拼接，
+    「二零二六」= 2026——旧逻辑逐字覆盖 num 会算成 6，种子关键词 2026-10-22 对不上，转述写
+    「二零二六年十月二十二日」会被误判变形（实证 RUN 608 修前 f07 覆盖 0.67）；修后 f07 留存、
+    留存率回到 10/12。位值写法（二十四／一百二十三）不受影响。
+  - 未确认->已确认 的状态翻转 = 严重变形（dot 验收要求，单独计数）。
+  - 已确认->未确认/不明 = 变形（置信降级）。
+  - 无对应种子事实的 hop 条目 = 臆造项，单独计数，不计入留存率分子。
+  - 留存率 = 留存条数 / 种子事实总数。
+  - 严格输入校验（v0.2 起，dot 验收要求；v0.3 补校验顺序）：先校验类型再查枚举——
+    confidence 缺失 = 允许，按"不明"处理（政策已明确）；confidence 非字符串或值非法
+    -> exit=1 点名字段；种子 status 非字符串 -> exit=1 点名；种子/hop 文件顶层非对象
+    -> exit=1 点名"顶层"；一律无 Traceback。
+  - 隔离规则（v0.3，dot 验收要求："不参与评分" ≠ "下一跳看不到"）：评分时排除
+    audit_note 只做"不参与评分"；盲测隔离靠材料管理——接力可见的 retelling 文本不得含
+    任何审计信息（原始状态/丢失项/打分标准/测试点说明），这些只进裁判侧材料（README）。
+    脚本无法约束人读什么，这条是流程规则，不是代码规则。
+
+输出：JSON（默认）或 --card 生成 Markdown 核查卡。
+退出码：0 打分完成；1 输入校验失败；2 用法错误。
+诚实声明：本脚本的匹配算法是关键词启发式，不是语义理解；分数只反映"按此规则"的
+测量结果，不证明 bot 的真实记忆能力。
+"""
+import json
+import re
+import sys
+
+MATCH_THRESHOLD = 0.5
+
+PUNCT = re.compile(r"[\s ，。、；：…—\-\"'""''（）()【】《》!！?？·]+")
+DIGIT_PART = re.compile(r"^\d+(\.\d+)?$")
+NUMERIC_PAT_FMT = r"(?<![\d.]){}(?!\d|\.\d)"
+
+VALID_CONF = {"已确认", "未确认", "不明"}
+VALID_STATUS = {"已确认", "未确认"}
+
+# 否定表达 guard（只用于纯数字关键词，见 part_matches）：
+# 数字匹配点紧邻前方（2 字内）出现否定词，视为"被否定修饰"，该次命中不计。
+NEG_CHARS = "没不未非无莫毋别"
+NEG_WORDS = ("没有", "并非", "不是", "无法", "并未", "不能")
+
+
+class InputError(Exception):
+    """输入格式错误（校验失败），非程序崩溃。"""
+
+
+def norm(s):
+    return PUNCT.sub("", s or "")
+
+
+CN_DIGIT = {"零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "两": 2}
+CN_UNIT = {"十": 10, "百": 100, "千": 1000}
+CN_BIG = {"万": 10000, "亿": 100000000}
+CN_NUMERAL_RUN = re.compile(r"[零一二三四五六七八九十百千万两]+(?:点[零一二三四五六七八九]+)?")
+
+
+def _cn_int(s):
+    """中文整数写法 -> int；非法组合返回 None（调用方原样保留）。"""
+    if s and all(ch in CN_DIGIT for ch in s):
+        # 纯数字字连续出现（无十/百/千/万/亿）是逐位写法，如年份「二零二六」= 2026，
+        # 不是位值写法；逐位拼接，不覆盖前一个 num（dot 6937317802 静态推演证实旧逻辑
+        # 会把「二零二六」算成 6；v0.5.1 修）。
+        return int("".join(str(CN_DIGIT[ch]) for ch in s))
+    total = 0
+    section = 0
+    num = 0
+    seen_digit = False
+    for ch in s:
+        if ch in CN_DIGIT:
+            num = CN_DIGIT[ch]
+            seen_digit = True
+        elif ch in CN_UNIT:
+            if not seen_digit:
+                num = 1
+            section += num * CN_UNIT[ch]
+            num = 0
+            seen_digit = False
+        elif ch in CN_BIG:
+            if section == 0 and num == 0 and not seen_digit:
+                section = 1
+            total += (section + num) * CN_BIG[ch]
+            section = 0
+            num = 0
+            seen_digit = False
+        else:
+            return None
+    return total + section + num
+
+
+def _cn_number(s):
+    """中文数字写法（含小数点）-> 阿拉伯数字字符串；无法解析返回 None。"""
+    if "点" in s:
+        ip, fp = s.split("点", 1)
+        if not ip or not fp:
+            return None
+        iv = _cn_int(ip)
+        if iv is None:
+            return None
+        digits = "".join(str(CN_DIGIT[c]) for c in fp)
+        if not digits:
+            return None
+        return "%d.%s" % (iv, digits)
+    v = _cn_int(s)
+    return None if v is None else str(v)
+
+
+def normalize_cn_numerals(text):
+    """把文本里的中文数字写法归一化为阿拉伯数字（v0.5）。"""
+    def repl(m):
+        v = _cn_number(m.group(0))
+        return v if v is not None else m.group(0)
+    return CN_NUMERAL_RUN.sub(repl, text)
+
+
+def part_matches(part, text):
+    """数字纯键用数字边界匹配（防 5 命中 15、5 命中 5.5），其余子串匹配。
+
+    纯数字键另带否定表达 guard：紧邻匹配点前方 2 字内出现否定词（没有/并非/不是/
+    无法/并未/不能/没/不/未/非/无/莫/毋/别），则该次命中不计——"没有5跳"不算记住
+    "5跳"。guard 只作用于数字键：非数字关键词里否定常是规则原文的一部分
+    （"不能回看"本身就是事实），启发式无法区分修饰与陈述，故明确声明为已知局限。
+    """
+    if DIGIT_PART.match(part):
+        pat = NUMERIC_PAT_FMT.format(re.escape(part))
+        for m in re.finditer(pat, text):
+            before = text[:m.start()]
+            if any(before.endswith(w) for w in NEG_WORDS):
+                continue
+            if before and before[-1] in NEG_CHARS:
+                continue
+            return True
+        return False
+    return part in text
+
+
+def load_seed(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        raise InputError(f"打不开种子文件：{path}")
+    except json.JSONDecodeError as e:
+        raise InputError(f"种子文件 {path} 不是合法 JSON：第 {e.lineno} 行附近")
+    if not isinstance(d, dict):
+        raise InputError(f"种子文件 {path} 顶层必须是对象，实际是 {type(d).__name__}")
+    facts = d.get("facts")
+    validate_seed(facts)
+    return facts
+
+
+def validate_seed(facts):
+    if not isinstance(facts, list) or not facts:
+        raise InputError("seed_facts.json: facts 必须是非空数组")
+    for i, f in enumerate(facts):
+        loc = f"种子事实[{i}]"
+        if not isinstance(f, dict):
+            raise InputError(f"{loc} 必须是对象")
+        for field in ("id", "text", "status", "keywords"):
+            if field not in f:
+                raise InputError(f"{loc} 缺字段：{field}")
+        if not isinstance(f["id"], str) or not f["id"]:
+            raise InputError(f"{loc} 的 id 必须是非空字符串")
+        if not isinstance(f["text"], str) or not f["text"]:
+            raise InputError(f"{loc} 的 text 必须是非空字符串")
+        # v0.3：先校验类型再查枚举。status 是数组/对象时直接 in 集合会抛
+        # TypeError（不可哈希），且不在 InputError 捕获范围内（dot 6326331117）。
+        status = f["status"]
+        if not isinstance(status, str):
+            raise InputError(f"{loc} 的 status 类型非法：{type(status).__name__}，只能是字符串")
+        if status not in VALID_STATUS:
+            raise InputError(f"{loc} 的 status 非法：{status!r}，只能是 已确认/未确认")
+        kws = f["keywords"]
+        if not isinstance(kws, list) or not kws or not all(isinstance(k, str) and k for k in kws):
+            raise InputError(f"{loc} 的 keywords 必须是非空字符串数组")
+
+
+def load_hop(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        raise InputError(f"打不开 hop 文件：{path}")
+    except json.JSONDecodeError as e:
+        raise InputError(f"hop 文件 {path} 不是合法 JSON：第 {e.lineno} 行附近")
+    if not isinstance(d, dict):
+        raise InputError(f"hop 文件 {path} 顶层必须是对象")
+    hop_no, by, pack = d.get("hop", "?"), d.get("by", "?"), d.get("pack")
+    validate_hop(path, hop_no, pack)
+    return hop_no, by, pack
+
+
+def validate_hop(path, hop_no, pack):
+    loc = f"hop{hop_no}_pack({path})"
+    if not isinstance(pack, list):
+        raise InputError(f"{loc}：pack 必须是数组")
+    for i, e in enumerate(pack):
+        eloc = f"{loc} 条目[{i}]"
+        if not isinstance(e, dict):
+            raise InputError(f"{eloc} 必须是对象")
+        if "text" not in e or not isinstance(e["text"], str) or not e["text"]:
+            raise InputError(f"{eloc} 缺 text 或 text 非字符串")
+        # v0.3：confidence 缺失 = 允许，按"不明"处理（政策已明确）；先校验类型
+        # 再查枚举——数组/对象进 in 集合会抛 TypeError（dot 6326331117）。
+        conf = e.get("confidence", "不明")
+        if not isinstance(conf, str):
+            raise InputError(f"{eloc} 的 confidence 类型非法：{type(conf).__name__}，只能是字符串")
+        if conf not in VALID_CONF:
+            raise InputError(f"{eloc} 的 confidence 非法：{conf!r}，只能是 已确认/未确认/不明")
+        if "audit_note" in e and not isinstance(e["audit_note"], bool):
+            raise InputError(f"{eloc} 的 audit_note 必须是布尔值")
+
+
+def coverage_detail(seed_fact, hop_text):
+    """返回 (覆盖率, 缺失的数字关键词列表)。关键词支持 | 同义备选；数字纯键用边界匹配。"""
+    kws = [normalize_cn_numerals(norm(k)) for k in seed_fact.get("keywords", [])]
+    t = normalize_cn_numerals(norm(hop_text))
+    if not kws:
+        return 0.0, []
+    missed_numeric = []
+    hit = 0
+    for k in kws:
+        parts = [p for p in k.split("|") if p]
+        matched = any(part_matches(p, t) for p in parts)
+        if matched:
+            hit += 1
+        elif any(DIGIT_PART.match(p) for p in parts):
+            missed_numeric.append(k)
+    return hit / len(kws), missed_numeric
+
+
+def score_hop(seed, hop_no, by, pack):
+    # 审计注条目先摘出来：不参与匹配、不计臆造、单独计数。
+    audit_notes = [hf.get("text", "") for hf in pack if hf.get("audit_note", False)]
+    items = [hf for hf in pack if not hf.get("audit_note", False)]
+    used = set()
+    retained, deformed, lost, fabricated = [], [], [], []
+    severe_flips = []
+    for sf in seed:
+        best, best_cov, best_missed = None, 0.0, []
+        for i, hf in enumerate(items):
+            if i in used:
+                continue
+            c, missed = coverage_detail(sf, hf.get("text", ""))
+            if c > best_cov:
+                best, best_cov, best_missed = i, c, missed
+        sid = sf["id"]
+        if best is None or best_cov < MATCH_THRESHOLD:
+            lost.append({"id": sid, "seed": sf["text"], "best_coverage": round(best_cov, 2)})
+            continue
+        used.add(best)
+        hf = items[best]
+        seed_status = sf.get("status", "")
+        hop_conf = hf.get("confidence", "不明")
+        flip_up = seed_status == "未确认" and hop_conf == "已确认"
+        downgrade = seed_status == "已确认" and hop_conf in ("未确认", "不明")
+        if flip_up:
+            severe_flips.append(sid)
+        if best_cov >= 1.0 and not flip_up and not downgrade:
+            retained.append(sid)
+        else:
+            kinds = []
+            if best_cov < 1.0:
+                kinds.append("内容缺损")
+            if best_missed:
+                kinds.append("数值变化/缺失")
+            if flip_up:
+                kinds.append("严重变形：未确认->已确认")
+            if downgrade:
+                kinds.append("置信降级")
+            deformed.append({"id": sid, "kinds": kinds, "coverage": round(best_cov, 2),
+                             "seed": sf["text"], "hop_text": hf.get("text", "")})
+    for i, hf in enumerate(items):
+        if i not in used:
+            fabricated.append(hf.get("text", ""))
+    total = len(seed)
+    rate = len(retained) / total if total else 0.0
+    return {
+        "hop": hop_no, "by": by,
+        "retained": retained, "deformed": deformed, "lost": lost,
+        "fabricated": fabricated, "severe_flips": severe_flips,
+        "audit_notes": audit_notes,
+        "stats": {
+            "seed_total": total,
+            "retained": len(retained), "deformed": len(deformed),
+            "lost": len(lost), "fabricated": len(fabricated),
+            "severe_flips": len(severe_flips),
+            "audit_notes": len(audit_notes),
+            "retention_rate": round(rate, 3),
+        },
+    }
+
+
+def card(seed, results):
+    lines = ["# 记忆接力打分卡（muse 打样，合成数据）", ""]
+    for r in results:
+        s = r["stats"]
+        lines.append("## 第 %s 跳（%s）" % (r["hop"], r["by"]))
+        lines.append("- 留存 %s/%s，留存率 %s" % (s["retained"], s["seed_total"], s["retention_rate"]))
+        lines.append("- 变形 %s（严重翻转 %s）｜丢失 %s｜臆造 %s｜审计注 %s" % (
+            s["deformed"], s["severe_flips"], s["lost"], s["fabricated"], s["audit_notes"]))
+        for d in r["deformed"]:
+            lines.append("  - 变形 %s（%s，覆盖 %s）：%s" % (
+                d["id"], "/".join(d["kinds"]), d["coverage"], d["hop_text"]))
+        for l in r["lost"]:
+            lines.append("  - 丢失 %s：%s" % (l["id"], l["seed"]))
+        for fb in r["fabricated"]:
+            lines.append("  - 臆造：%s" % fb)
+        lines.append("")
+    lines.append("口径：关键词启发式匹配（数字纯键用数字边界＋否定 guard，非数字键否定"
+               "仍是已知局限），分数仅为按规则测量；以上均为合成打样，非成员真实参与。")
+    return "\n".join(lines)
+
+
+def main(argv):
+    card_mode = "--card" in argv
+    paths = [a for a in argv if a != "--card"]
+    if len(paths) < 2:
+        print("用法: memory_relay_score.py seed_facts.json hop1_pack.json [hop2_pack.json ...] [--card]",
+              file=sys.stderr)
+        return 2
+    try:
+        seed = load_seed(paths[0])
+        results = []
+        for p in paths[1:]:
+            hop_no, by, pack = load_hop(p)
+            results.append(score_hop(seed, hop_no, by, pack))
+    except InputError as e:
+        print(f"输入错误：{e}", file=sys.stderr)
+        return 1
+    if card_mode:
+        print(card(seed, results))
+    else:
+        print(json.dumps({"seed_total": len(seed), "hops": results}, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
