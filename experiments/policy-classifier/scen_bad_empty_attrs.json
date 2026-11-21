@@ -1,0 +1,102 @@
+{
+  "_note": "校验负例合成（dot 6327665689）：s01 的 attributes 为空对象，应 exit=1 点名缺失属性、无 Traceback。",
+  "scenarios": [
+    {
+      "id": "s01",
+      "description": "虚构场景：bot 小哨在公开讨论帖下回帖续话题（公开评论，无不可逆后果）",
+      "attributes": {},
+      "approved": "虚构设定：该社区公约允许成员公开回帖",
+      "executed": true,
+      "expected": "auto",
+      "synthetic": true
+    },
+    {
+      "id": "s02",
+      "description": "虚构场景：小哨把一份经核验的投稿 JSON 合入仓库（虚构设定中已获维护授权，须留痕）",
+      "attributes": {
+        "involves_money": false,
+        "involves_private_info": false,
+        "acts_for_owner_binding": false,
+        "changes_repo_settings": false,
+        "impersonation": false,
+        "site_write_unapproved": false,
+        "uses_granted_write": true,
+        "publishes_facts": false,
+        "at_mentions": false,
+        "pushes_branch": false,
+        "public_reply": false,
+        "read_only_public": false
+      },
+      "approved": "虚构设定：仓库维护者授予了合入权",
+      "executed": false,
+      "expected": "log",
+      "synthetic": true
+    },
+    {
+      "id": "s03",
+      "description": "虚构场景：小哨为排查故障，手动触发了站点的采集任务（虚构设定：未获批准）",
+      "attributes": {
+        "involves_money": false,
+        "involves_private_info": false,
+        "acts_for_owner_binding": false,
+        "changes_repo_settings": false,
+        "impersonation": false,
+        "site_write_unapproved": true,
+        "uses_granted_write": false,
+        "publishes_facts": false,
+        "at_mentions": false,
+        "pushes_branch": false,
+        "public_reply": false,
+        "read_only_public": false
+      },
+      "approved": "虚构设定：未获批准",
+      "executed": false,
+      "expected": "never",
+      "synthetic": true
+    },
+    {
+      "id": "s04",
+      "description": "虚构场景：小哨调用按量付费的大模型 API 跑一次大规模对比实验",
+      "attributes": {
+        "involves_money": true,
+        "involves_private_info": false,
+        "acts_for_owner_binding": false,
+        "changes_repo_settings": false,
+        "impersonation": false,
+        "site_write_unapproved": false,
+        "uses_granted_write": false,
+        "publishes_facts": false,
+        "at_mentions": false,
+        "pushes_branch": false,
+        "public_reply": false,
+        "read_only_public": false
+      },
+      "approved": "虚构设定：未获批准（该虚构组织规定绝不做付费调用）",
+      "executed": false,
+      "expected": "never",
+      "synthetic": true
+    },
+    {
+      "id": "s05",
+      "description": "虚构场景：小哨在公开回帖里引用主人的私人邮箱来证明某个结论",
+      "attributes": {
+        "involves_money": false,
+        "involves_private_info": true,
+        "acts_for_owner_binding": false,
+        "changes_repo_settings": false,
+        "impersonation": false,
+        "site_write_unapproved": false,
+        "uses_granted_write": false,
+        "publishes_facts": true,
+        "at_mentions": false,
+        "pushes_branch": false,
+        "public_reply": true,
+        "read_only_public": false
+      },
+      "approved": "虚构设定：未获批准（隐私边界）",
+      "executed": false,
+      "expected": "never",
+      "synthetic": true
+    }
+  ]
+}
